@@ -87,6 +87,10 @@ class Android extends Platform {
     }
   }
 
+  @Override public boolean isAlpnSupported() {
+    return setAlpnProtocols != null;
+  }
+
   @Override public String getSelectedProtocol(SSLSocket socket) {
     if (getAlpnSelectedProtocol == null) return null;
     if (!getAlpnSelectedProtocol.isSupported(socket)) return null;

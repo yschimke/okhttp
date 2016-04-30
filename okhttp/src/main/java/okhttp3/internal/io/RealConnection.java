@@ -26,6 +26,7 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownServiceException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLPeerUnverifiedException;
@@ -148,7 +149,7 @@ public final class RealConnection extends FramedConnection.Listener implements C
         throw new ProtocolException("Too many tunnel connections attempted: " + maxAttempts);
       }
 
-      connectSocket(connectTimeout, readTimeout, writeTimeout, connectionSpecSelector);
+      connectSocket(connectTimeout, readTimeout);
       tunnelRequest = createTunnel(readTimeout, writeTimeout, tunnelRequest, url);
 
       if (tunnelRequest == null) break; // Tunnel successfully created.
@@ -167,12 +168,11 @@ public final class RealConnection extends FramedConnection.Listener implements C
   /** Does all the work necessary to build a full HTTP or HTTPS connection on a raw socket. */
   private void buildConnection(int connectTimeout, int readTimeout, int writeTimeout,
       ConnectionSpecSelector connectionSpecSelector) throws IOException {
-    connectSocket(connectTimeout, readTimeout, writeTimeout, connectionSpecSelector);
+    connectSocket(connectTimeout, readTimeout);
     establishProtocol(readTimeout, writeTimeout, connectionSpecSelector);
   }
 
-  private void connectSocket(int connectTimeout, int readTimeout, int writeTimeout,
-      ConnectionSpecSelector connectionSpecSelector) throws IOException {
+  private void connectSocket(int connectTimeout, int readTimeout) throws IOException {
     Proxy proxy = route.proxy();
     Address address = route.address();
 
@@ -195,7 +195,13 @@ public final class RealConnection extends FramedConnection.Listener implements C
     if (route.address().sslSocketFactory() != null) {
       connectTls(readTimeout, writeTimeout, connectionSpecSelector);
     } else {
-      protocol = Protocol.HTTP_1_1;
+      if (route.address().protocols().equals(Arrays.asList(Protocol.HTTP_2))) {
+        // h2c assumed mode
+        protocol = Protocol.HTTP_2;
+      } else {
+        // TODO: attempt upgrade if http2 is in protocols
+        protocol = Protocol.HTTP_1_1;
+      }
       socket = rawSocket;
     }
 
@@ -263,6 +269,9 @@ public final class RealConnection extends FramedConnection.Listener implements C
       protocol = maybeProtocol != null
           ? Protocol.get(maybeProtocol)
           : Protocol.HTTP_1_1;
+      if (!address.protocols().contains(protocol)) {
+        throw new IOException("negotiated an unsupported protocol: " + protocol);
+      }
       success = true;
     } catch (AssertionError e) {
       if (Util.isAndroidGetsocknameError(e)) throw new IOException(e);

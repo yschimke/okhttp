@@ -66,6 +66,10 @@ class JdkWithJettyBootPlatform extends Platform {
     }
   }
 
+  @Override public boolean isAlpnSupported() {
+    return true;
+  }
+
   public static Platform buildIfSupported() {
     // Find Jetty's ALPN extension for OpenJDK.
     try {

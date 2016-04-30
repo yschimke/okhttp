@@ -127,14 +127,8 @@ public class Platform {
     return true;
   }
 
-  public static List<String> alpnProtocolNames(List<Protocol> protocols) {
-    List<String> names = new ArrayList<>(protocols.size());
-    for (int i = 0, size = protocols.size(); i < size; i++) {
-      Protocol protocol = protocols.get(i);
-      if (protocol == Protocol.HTTP_1_0) continue; // No HTTP/1.0 for ALPN.
-      names.add(protocol.toString());
-    }
-    return names;
+  public boolean isAlpnSupported() {
+    return false;
   }
 
   /** Attempt to match the host runtime to a capable Platform implementation. */
@@ -197,5 +191,15 @@ public class Platform {
     }
 
     return null;
+  }
+
+  static List<String> alpnProtocolNames(List<Protocol> protocols) {
+    List<String> names = new ArrayList<>(protocols.size());
+    for (int i = 0, size = protocols.size(); i < size; i++) {
+      Protocol protocol = protocols.get(i);
+      if (protocol == Protocol.HTTP_1_0) continue; // No HTTP/1.0 for ALPN.
+      names.add(protocol.toString());
+    }
+    return names;
   }
 }

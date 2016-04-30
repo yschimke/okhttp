@@ -53,6 +53,10 @@ final class Jdk9Platform extends Platform {
     }
   }
 
+  @Override public boolean isAlpnSupported() {
+    return true;
+  }
+
   public static Jdk9Platform buildIfSupported() {
     // Find JDK 9 new methods
     try {

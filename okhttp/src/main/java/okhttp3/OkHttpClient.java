@@ -733,19 +733,19 @@ public class OkHttpClient implements Cloneable, Call.Factory {
      * HTTP/1.1} only. If the server responds with {@code HTTP/1.0}, that will be exposed by {@link
      * Response#protocol()}.
      *
-     * @param protocols the protocols to use, in order of preference. The list must contain {@link
-     * Protocol#HTTP_1_1}. It must not contain null or {@link Protocol#HTTP_1_0}.
+     * @param protocols the protocols to use, in order of preference. It must not contain null or
+     * {@link Protocol#HTTP_1_0}.
      */
     public Builder protocols(List<Protocol> protocols) {
       protocols = Util.immutableList(protocols);
-      if (!protocols.contains(Protocol.HTTP_1_1)) {
-        throw new IllegalArgumentException("protocols doesn't contain http/1.1: " + protocols);
-      }
       if (protocols.contains(Protocol.HTTP_1_0)) {
         throw new IllegalArgumentException("protocols must not contain http/1.0: " + protocols);
       }
       if (protocols.contains(null)) {
         throw new IllegalArgumentException("protocols must not contain null");
+      }
+      if (protocols.isEmpty()) {
+        throw new IllegalArgumentException("protocols can't be empty");
       }
       this.protocols = Util.immutableList(protocols);
       return this;

@@ -40,6 +40,7 @@ import okhttp3.ResponseBody;
 import okhttp3.Route;
 import okhttp3.internal.Internal;
 import okhttp3.internal.InternalCache;
+import okhttp3.internal.Platform;
 import okhttp3.internal.Version;
 import okio.Buffer;
 import okio.BufferedSink;
@@ -975,15 +976,23 @@ public final class HttpEngine {
     SSLSocketFactory sslSocketFactory = null;
     HostnameVerifier hostnameVerifier = null;
     CertificatePinner certificatePinner = null;
+
+    List<Protocol> protocols = client.protocols();
+
     if (request.isHttps()) {
       sslSocketFactory = client.sslSocketFactory();
       hostnameVerifier = client.hostnameVerifier();
       certificatePinner = client.certificatePinner();
+
+      // secure request but we can't negotiate h2
+      if (!Platform.get().isAlpnSupported() && !protocols.contains(Protocol.HTTP_1_1)) {
+        throw new IllegalArgumentException("protocols doesn't contain http/1.1: " + protocols);
+      }
     }
 
     return new Address(request.url().host(), request.url().port(), client.dns(),
         client.socketFactory(), sslSocketFactory, hostnameVerifier, certificatePinner,
-        client.proxyAuthenticator(), client.proxy(), client.protocols(),
+        client.proxyAuthenticator(), client.proxy(), protocols,
         client.connectionSpecs(), client.proxySelector());
   }
 }
