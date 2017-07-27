@@ -120,13 +120,13 @@ public final class EventListenerTest {
 
     DnsStart dnsStart = listener.removeUpToEvent(DnsStart.class);
     assertSame(call, dnsStart.call);
-    assertEquals("localhost", dnsStart.domainName);
+    assertEquals("localhost", dnsStart.firstParam());
 
     DnsEnd dnsEnd = listener.removeUpToEvent(DnsEnd.class);
     assertSame(call, dnsEnd.call);
-    assertEquals("localhost", dnsEnd.domainName);
-    assertEquals(1, dnsEnd.inetAddressList.size());
-    assertNull(dnsEnd.throwable);
+    assertEquals("localhost", dnsEnd.firstParam());
+    assertEquals(singleDns.lookup("localhost"), dnsEnd.secondParam());
+    assertNull(dnsEnd.thirdParam());
   }
 
   @Test public void noDnsLookupOnPooledConnection() throws IOException {
@@ -199,9 +199,9 @@ public final class EventListenerTest {
 
     DnsEnd dnsEnd = listener.removeUpToEvent(DnsEnd.class);
     assertSame(call, dnsEnd.call);
-    assertEquals("fakeurl", dnsEnd.domainName);
-    assertNull(dnsEnd.inetAddressList);
-    assertTrue(dnsEnd.throwable instanceof UnknownHostException);
+    assertEquals("fakeurl", dnsEnd.firstParam());
+    assertNull(dnsEnd.secondParam());
+    assertTrue(dnsEnd.thirdParam() instanceof UnknownHostException);
   }
 
   @Test public void emptyDnsLookup() {
@@ -227,9 +227,9 @@ public final class EventListenerTest {
 
     DnsEnd dnsEnd = listener.removeUpToEvent(DnsEnd.class);
     assertSame(call, dnsEnd.call);
-    assertEquals("fakeurl", dnsEnd.domainName);
-    assertNull(dnsEnd.inetAddressList);
-    assertTrue(dnsEnd.throwable instanceof UnknownHostException);
+    assertEquals("fakeurl", dnsEnd.firstParam());
+    assertNull(dnsEnd.secondParam());
+    assertTrue(dnsEnd.thirdParam() instanceof UnknownHostException);
   }
 
   @Test public void successfulConnect() throws IOException {
@@ -247,14 +247,14 @@ public final class EventListenerTest {
 
     ConnectStart connectStart = listener.removeUpToEvent(ConnectStart.class);
     assertSame(call, connectStart.call);
-    assertEquals(expectedAddress, connectStart.inetSocketAddress);
-    assertEquals(Proxy.NO_PROXY, connectStart.proxy);
+    assertEquals(expectedAddress, connectStart.firstParam());
+    assertEquals(Proxy.NO_PROXY, connectStart.secondParam());
 
     ConnectEnd connectEnd = listener.removeUpToEvent(ConnectEnd.class);
     assertSame(call, connectEnd.call);
-    assertEquals(expectedAddress, connectEnd.inetSocketAddress);
-    assertEquals(Protocol.HTTP_1_1, connectEnd.protocol);
-    assertNull(connectEnd.throwable);
+    assertEquals(expectedAddress, connectEnd.firstParam());
+    assertEquals(Protocol.HTTP_1_1, connectEnd.secondParam());
+    assertNull(connectEnd.thirdParam());
   }
 
   @Test public void failedConnect() throws UnknownHostException {
@@ -276,14 +276,14 @@ public final class EventListenerTest {
 
     ConnectStart connectStart = listener.removeUpToEvent(ConnectStart.class);
     assertSame(call, connectStart.call);
-    assertEquals(expectedAddress, connectStart.inetSocketAddress);
-    assertEquals(Proxy.NO_PROXY, connectStart.proxy);
+    assertEquals(expectedAddress, connectStart.firstParam());
+    assertEquals(Proxy.NO_PROXY, connectStart.secondParam());
 
     ConnectEnd connectEnd = listener.removeUpToEvent(ConnectEnd.class);
     assertSame(call, connectEnd.call);
-    assertEquals(expectedAddress, connectEnd.inetSocketAddress);
-    assertNull(connectEnd.protocol);
-    assertTrue(connectEnd.throwable instanceof IOException);
+    assertEquals(expectedAddress, connectEnd.firstParam());
+    assertNull(connectEnd.secondParam());
+    assertTrue(connectEnd.thirdParam() instanceof IOException);
   }
 
   @Test public void multipleConnectsForSingleCall() throws IOException {
@@ -328,14 +328,14 @@ public final class EventListenerTest {
 
     ConnectStart connectStart = listener.removeUpToEvent(ConnectStart.class);
     assertSame(call, connectStart.call);
-    assertEquals(expectedAddress, connectStart.inetSocketAddress);
-    assertEquals(server.toProxyAddress(), connectStart.proxy);
+    assertEquals(expectedAddress, connectStart.firstParam());
+    assertEquals(server.toProxyAddress(), connectStart.secondParam());
 
     ConnectEnd connectEnd = listener.removeUpToEvent(ConnectEnd.class);
     assertSame(call, connectEnd.call);
-    assertEquals(expectedAddress, connectEnd.inetSocketAddress);
-    assertEquals(Protocol.HTTP_1_1, connectEnd.protocol);
-    assertNull(connectEnd.throwable);
+    assertEquals(expectedAddress, connectEnd.firstParam());
+    assertEquals(Protocol.HTTP_1_1, connectEnd.secondParam());
+    assertNull(connectEnd.thirdParam());
   }
 
   @Test public void successfulSocksProxyConnect() throws Exception {
@@ -361,14 +361,14 @@ public final class EventListenerTest {
 
     ConnectStart connectStart = listener.removeUpToEvent(ConnectStart.class);
     assertSame(call, connectStart.call);
-    assertEquals(expectedAddress, connectStart.inetSocketAddress);
-    assertEquals(proxy, connectStart.proxy);
+    assertEquals(expectedAddress, connectStart.firstParam());
+    assertEquals(proxy, connectStart.secondParam());
 
     ConnectEnd connectEnd = listener.removeUpToEvent(ConnectEnd.class);
     assertSame(call, connectEnd.call);
-    assertEquals(expectedAddress, connectEnd.inetSocketAddress);
-    assertEquals(Protocol.HTTP_1_1, connectEnd.protocol);
-    assertNull(connectEnd.throwable);
+    assertEquals(expectedAddress, connectEnd.firstParam());
+    assertEquals(Protocol.HTTP_1_1, connectEnd.secondParam());
+    assertNull(connectEnd.thirdParam());
   }
 
   @Test public void authenticatingTunnelProxyConnect() throws IOException {
@@ -396,8 +396,8 @@ public final class EventListenerTest {
     listener.removeUpToEvent(ConnectStart.class);
 
     ConnectEnd connectEnd = listener.removeUpToEvent(ConnectEnd.class);
-    assertNull(connectEnd.protocol);
-    assertNull(connectEnd.throwable);
+    assertNull(connectEnd.secondParam());
+    assertNull(connectEnd.thirdParam());
 
     listener.removeUpToEvent(ConnectStart.class);
     listener.removeUpToEvent(ConnectEnd.class);
@@ -419,8 +419,8 @@ public final class EventListenerTest {
 
     SecureConnectEnd secureEnd = listener.removeUpToEvent(SecureConnectEnd.class);
     assertSame(call, secureEnd.call);
-    assertNotNull(secureEnd.handshake);
-    assertNull(secureEnd.throwable);
+    assertNotNull(secureEnd.firstParam());
+    assertNull(secureEnd.secondParam());
   }
 
   @Test public void failedSecureConnect() {
@@ -442,8 +442,8 @@ public final class EventListenerTest {
 
     SecureConnectEnd secureEnd = listener.removeUpToEvent(SecureConnectEnd.class);
     assertSame(call, secureEnd.call);
-    assertNull(secureEnd.handshake);
-    assertTrue(secureEnd.throwable instanceof IOException);
+    assertNull(secureEnd.firstParam());
+    assertTrue(secureEnd.secondParam() instanceof IOException);
   }
 
   @Test public void secureConnectWithTunnel() throws IOException {
@@ -468,8 +468,8 @@ public final class EventListenerTest {
 
     SecureConnectEnd secureEnd = listener.removeUpToEvent(SecureConnectEnd.class);
     assertSame(call, secureEnd.call);
-    assertNotNull(secureEnd.handshake);
-    assertNull(secureEnd.throwable);
+    assertNotNull(secureEnd.firstParam());
+    assertNull(secureEnd.secondParam());
   }
 
   @Test public void multipleSecureConnectsForSingleCall() throws IOException {
@@ -539,7 +539,7 @@ public final class EventListenerTest {
 
     ConnectionAcquired connectionFound = listener.removeUpToEvent(ConnectionAcquired.class);
     assertSame(call, connectionFound.call);
-    assertNotNull(connectionFound.connection);
+    assertNotNull(connectionFound.firstParam());
   }
 
   @Test public void noConnectionFoundOnFollowUp() throws IOException {
@@ -584,7 +584,7 @@ public final class EventListenerTest {
     response2.body().close();
 
     ConnectionAcquired connectionFound2 = listener.removeUpToEvent(ConnectionAcquired.class);
-    assertSame(connectionFound1.connection, connectionFound2.connection);
+    assertSame(connectionFound1.firstParam(), connectionFound2.firstParam());
   }
 
   @Test public void multipleConnectionsFoundForSingleCall() throws IOException {
@@ -615,58 +615,48 @@ public final class EventListenerTest {
 
   static class CallEvent {
     final Call call;
-    final List<Object> params;
+    private final List<Object> params;
 
     CallEvent(Call call, Object... params) {
       this.call = call;
       this.params = Arrays.asList(params);
     }
+
+    Object firstParam() {
+      return params.get(0);
+    }
+
+    Object secondParam() {
+      return params.get(1);
+    }
+
+    Object thirdParam() {
+      return params.get(2);
+    }
   }
 
   static final class DnsStart extends CallEvent {
-    final String domainName;
-
     DnsStart(Call call, String domainName) {
       super(call, domainName);
-      this.domainName = domainName;
     }
   }
 
   static final class DnsEnd extends CallEvent {
-    final String domainName;
-    final List<InetAddress> inetAddressList;
-    final Throwable throwable;
-
     DnsEnd(Call call, String domainName, List<InetAddress> inetAddressList, Throwable throwable) {
       super(call, domainName, inetAddressList, throwable);
-      this.domainName = domainName;
-      this.inetAddressList = inetAddressList;
-      this.throwable = throwable;
     }
   }
 
   static final class ConnectStart extends CallEvent {
-    final InetSocketAddress inetSocketAddress;
-    final Proxy proxy;
-
     ConnectStart(Call call, InetSocketAddress inetSocketAddress, Proxy proxy) {
       super(call, inetSocketAddress, proxy);
-      this.inetSocketAddress = inetSocketAddress;
-      this.proxy = proxy;
     }
   }
 
   static final class ConnectEnd extends CallEvent {
-    final InetSocketAddress inetSocketAddress;
-    final Protocol protocol;
-    final Throwable throwable;
-
     ConnectEnd(Call call, InetSocketAddress inetSocketAddress, Protocol protocol,
         Throwable throwable) {
       super(call, inetSocketAddress, protocol, throwable);
-      this.inetSocketAddress = inetSocketAddress;
-      this.protocol = protocol;
-      this.throwable = throwable;
     }
   }
 
@@ -677,31 +667,20 @@ public final class EventListenerTest {
   }
 
   static final class SecureConnectEnd extends CallEvent {
-    final Handshake handshake;
-    final Throwable throwable;
-
     SecureConnectEnd(Call call, Handshake handshake, Throwable throwable) {
       super(call, handshake, throwable);
-      this.handshake = handshake;
-      this.throwable = throwable;
     }
   }
 
   static final class ConnectionAcquired extends CallEvent {
-    final Connection connection;
-
     ConnectionAcquired(Call call, Connection connection) {
       super(call, connection);
-      this.connection = connection;
     }
   }
 
   static final class ConnectionReleased extends CallEvent {
-    final Connection connection;
-
     ConnectionReleased(Call call, Connection connection) {
       super(call, connection);
-      this.connection = connection;
     }
   }
 
@@ -712,11 +691,8 @@ public final class EventListenerTest {
   }
 
   static final class FetchEnd extends CallEvent {
-    final Throwable throwable;
-
     FetchEnd(Call call, Throwable throwable) {
       super(call, throwable);
-      this.throwable = throwable;
     }
   }
 
@@ -727,11 +703,8 @@ public final class EventListenerTest {
   }
 
   static final class RequestHeadersEnd extends CallEvent {
-    final Throwable throwable;
-
     RequestHeadersEnd(Call call, Throwable throwable) {
       super(call, throwable);
-      this.throwable = throwable;
     }
   }
 
@@ -742,11 +715,8 @@ public final class EventListenerTest {
   }
 
   static final class RequestBodyEnd extends CallEvent {
-    final Throwable throwable;
-
     RequestBodyEnd(Call call, Throwable throwable) {
       super(call, throwable);
-      this.throwable = throwable;
     }
   }
 
@@ -757,11 +727,8 @@ public final class EventListenerTest {
   }
 
   static final class ResponseHeadersEnd extends CallEvent {
-    final Throwable throwable;
-
     ResponseHeadersEnd(Call call, Throwable throwable) {
       super(call, throwable);
-      this.throwable = throwable;
     }
   }
 
@@ -772,11 +739,8 @@ public final class EventListenerTest {
   }
 
   static final class ResponseBodyEnd extends CallEvent {
-    final Throwable throwable;
-
     ResponseBodyEnd(Call call, Throwable throwable) {
       super(call, throwable);
-      this.throwable = throwable;
     }
   }
 
