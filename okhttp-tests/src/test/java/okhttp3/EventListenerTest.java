@@ -605,6 +605,79 @@ public final class EventListenerTest {
     listener.removeUpToEvent(ConnectionAcquired.class);
   }
 
+  @Test public void successfulRequestWithoutBody() throws IOException {
+    server.enqueue(new MockResponse()
+        .setBody("ABC"));
+
+    Call call = client.newCall(new Request.Builder()
+        .url(server.url("/"))
+        .build());
+    Response response = call.execute();
+    assertEquals("ABC", response.body().string());
+
+    RequestHeadersStart headersStart = listener.removeUpToEvent(RequestHeadersStart.class);
+    assertSame(call, headersStart.call);
+
+    RequestHeadersEnd headersEnd = listener.removeUpToEvent(RequestHeadersEnd.class);
+    assertSame(call, headersEnd.call);
+    assertNull(headersEnd.firstParam());
+
+    List<Class<?>> remainingEvents = listener.recordedEventTypes();
+    assertFalse(remainingEvents.contains(RequestBodyStart.class));
+    assertFalse(remainingEvents.contains(RequestBodyEnd.class));
+  }
+
+  @Test public void successfulRequestWithBody() throws IOException {
+    server.enqueue(new MockResponse()
+        .setBody("ABC"));
+
+    Call call = client.newCall(new Request.Builder()
+        .url(server.url("/"))
+        .post(RequestBody.create(MediaType.parse("text/plain"), "DEF"))
+        .build());
+    Response response = call.execute();
+    assertEquals("ABC", response.body().string());
+
+    RequestHeadersStart headersStart = listener.removeUpToEvent(RequestHeadersStart.class);
+    assertSame(call, headersStart.call);
+
+    RequestHeadersEnd headersEnd = listener.removeUpToEvent(RequestHeadersEnd.class);
+    assertSame(call, headersEnd.call);
+    assertNull(headersEnd.firstParam());
+
+    RequestBodyStart bodyStart = listener.removeUpToEvent(RequestBodyStart.class);
+    assertSame(call, bodyStart.call);
+
+    RequestBodyEnd bodyEnd = listener.removeUpToEvent(RequestBodyEnd.class);
+    assertSame(call, bodyEnd.call);
+    assertNull(bodyEnd.firstParam());
+  }
+
+  @Test public void successfulResponse() throws IOException {
+    server.enqueue(new MockResponse()
+        .setBody("ABC"));
+
+    Call call = client.newCall(new Request.Builder()
+        .url(server.url("/"))
+        .build());
+    Response response = call.execute();
+    assertEquals("ABC", response.body().string());
+
+    ResponseHeadersStart headersStart = listener.removeUpToEvent(ResponseHeadersStart.class);
+    assertSame(call, headersStart.call);
+
+    ResponseHeadersEnd headersEnd = listener.removeUpToEvent(ResponseHeadersEnd.class);
+    assertSame(call, headersEnd.call);
+    assertNull(headersEnd.firstParam());
+
+    ResponseBodyStart bodyStart = listener.removeUpToEvent(ResponseBodyStart.class);
+    assertSame(call, bodyStart.call);
+
+    ResponseBodyEnd bodyEnd = listener.removeUpToEvent(ResponseBodyEnd.class);
+    assertSame(call, bodyEnd.call);
+    assertNull(bodyEnd.firstParam());
+  }
+
   private void enableTlsWithTunnel(boolean tunnelProxy) {
     client = client.newBuilder()
         .sslSocketFactory(sslClient.socketFactory, sslClient.trustManager)
