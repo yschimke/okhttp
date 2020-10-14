@@ -15,8 +15,8 @@
  */
 package okhttp3
 
+import mockwebserver.MockWebServer
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.internal.TlsUtil.localhost
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

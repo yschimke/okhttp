@@ -15,12 +15,12 @@
  */
 package okhttp3
 
-import org.assertj.core.api.AssertionsForClassTypes.assertThat
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class SampleTest {
   @Test
   fun failingTest() {
-    assertThat("hello").isEqualTo("goodbye")
+    assertEquals("hello", "goodbye")
   }
 }
