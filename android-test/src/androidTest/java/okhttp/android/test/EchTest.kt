@@ -90,9 +90,9 @@ class EchTest() {
           if (data == null) {
             println("Unable to extract echConfigList from $echConfig")
           } else {
+            Conscrypt.setCheckDnsForEch(sslSocket, false)
             Conscrypt.setUseEchGrease(sslSocket, false)
             Conscrypt.setEchConfigList(sslSocket, data)
-            Conscrypt.setCheckDnsForEch(sslSocket, true)
           }
         }
 
@@ -113,12 +113,12 @@ class EchTest() {
       .sslSocketFactory(sslf2, tm)
       .build()
 
-    val request = Request.Builder().url("https://crypto.cloudflare.com/").build()
+    val request = Request.Builder().url("https://crypto.cloudflare.com/cdn-cgi/trace").build()
     client.newCall(request).execute().use { response ->
       println(response.code)
       println(response.protocol)
       println(response.handshake?.tlsVersion)
-      response.body!!.string().take(40)
+      println(response.body!!.string())
     }
   }
 }
