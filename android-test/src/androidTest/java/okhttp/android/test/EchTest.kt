@@ -37,6 +37,7 @@ import okio.IOException
 import org.conscrypt.Conscrypt
 import org.conscrypt.EchDnsPacket
 import org.junit.jupiter.api.Test
+import org.xbill.DNS.DohResolver
 import org.xbill.DNS.HTTPSRecord
 import org.xbill.DNS.Resolver
 import org.xbill.DNS.SVCBBase
@@ -51,7 +52,8 @@ class EchTest() {
   fun testDns() {
     Security.insertProviderAt(Conscrypt.newProviderBuilder().build(), 1)
 
-    val r: Resolver = SimpleResolver("1.1.1.1")
+    // val r: Resolver = SimpleResolver("1.1.1.1")
+    val r: Resolver = DohResolver("https://cloudflare-dns.com/dns-query")
     val s = LookupSession.defaultBuilder()
       .resolver(r)
       .build()
