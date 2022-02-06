@@ -15,12 +15,6 @@
  */
 package okhttp.android.test
 
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
-import androidx.test.core.app.ApplicationProvider
-import java.net.InetAddress
 import java.security.Security
 import javax.net.ssl.SSLSocket
 import okhttp3.Call
@@ -32,16 +26,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.internal.ech.DnsJavaDns
 import okhttp3.tls.HandshakeCertificates
-import okio.ByteString.Companion.toByteString
-import okio.IOException
 import org.conscrypt.Conscrypt
-import org.conscrypt.EchDnsPacket
 import org.junit.jupiter.api.Test
 import org.xbill.DNS.DohResolver
 import org.xbill.DNS.HTTPSRecord
 import org.xbill.DNS.Resolver
 import org.xbill.DNS.SVCBBase
-import org.xbill.DNS.SimpleResolver
 import org.xbill.DNS.lookup.LookupSession
 
 /**
@@ -54,24 +44,14 @@ class EchTest() {
 
     // val r: Resolver = SimpleResolver("1.1.1.1")
     val r: Resolver = DohResolver("https://cloudflare-dns.com/dns-query")
-    val s = LookupSession.defaultBuilder()
-      .resolver(r)
-      .build()
+    val s = LookupSession.defaultBuilder().resolver(r).build()
 
     val dns = DnsJavaDns(s)
 
-    val certs = HandshakeCertificates.Builder()
-      .addPlatformTrustedCertificates()
-      .build()
+    val certs = HandshakeCertificates.Builder().addPlatformTrustedCertificates().build()
 
     val sslf = certs.sslSocketFactory()
     val tm = certs.trustManager
-
-    val getEchConfigListFromDnsRR =
-      EchDnsPacket::class.java.getDeclaredMethod("getEchConfigListFromDnsRR", ByteArray::class.java)
-        .apply {
-          isAccessible = true
-        }
 
     val sslf2 = object : DelegatingSSLSocketFactory(sslf) {
       override fun configureSocket(sslSocket: SSLSocket): SSLSocket {
@@ -80,14 +60,9 @@ class EchTest() {
         if (echConfig == null) {
           println("Unable to activate ECH for ${sslSocket.inetAddress}")
         } else {
-          val echConfigEchList = echConfig
-            ?.getSvcParamValue(HTTPSRecord.ECH) as SVCBBase.ParameterEch?
+          val echConfigEchList = echConfig.getSvcParamValue(HTTPSRecord.ECH) as SVCBBase.ParameterEch?
 
-          println("HTTPSRecord.ECH")
           val data = echConfigEchList?.data
-          println("Base 64 " + data?.toByteString()?.base64())
-
-          // val echConfigList = getEchConfigListFromDnsRR.invoke(null, echConfig.rdataToWireCanonical()) as ByteArray?
 
           if (data == null) {
             println("Unable to extract echConfigList from $echConfig")
@@ -108,7 +83,6 @@ class EchTest() {
       .eventListener(object : EventListener() {
         override fun connectionAcquired(call: Call, connection: Connection) {
           val sslSocket = connection.socket() as SSLSocket
-          println(sslSocket.inetAddress)
           println("ECH was active " + Conscrypt.echAccepted(sslSocket))
         }
       })
@@ -118,8 +92,6 @@ class EchTest() {
     val request = Request.Builder().url("https://crypto.cloudflare.com/cdn-cgi/trace").build()
     client.newCall(request).execute().use { response ->
       println(response.code)
-      println(response.protocol)
-      println(response.handshake?.tlsVersion)
       println(response.body!!.string())
     }
   }
