@@ -54,7 +54,7 @@ object Dependencies {
   const val bouncycastletls = "org.bouncycastle:bctls-jdk15to18:${Versions.bouncyCastle}"
   const val brotli = "org.brotli:dec:0.1.2"
   const val conscrypt = "org.conscrypt:conscrypt-openjdk-uber:${Versions.conscrypt}"
-  const val conscryptAndroid = "org.conscrypt:conscrypt-android:${Versions.conscrypt}"
+  const val conscryptAndroid = "info.guardianproject.conscrypt:conscrypt-android:2.6.alpha1638179154.job1828169525"
   const val corretto = "software.amazon.cryptools:AmazonCorrettoCryptoProvider:1.6.1:linux-x86_64"
   const val equinox = "org.eclipse.platform:org.eclipse.osgi:3.17.100"
   const val guava = "com.google.guava:guava:31.0.1-jre"

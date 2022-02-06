@@ -76,4 +76,6 @@ dependencies {
   androidTestImplementation(Dependencies.junit5Api)
   androidTestImplementation(Dependencies.junit5AndroidCore)
   androidTestRuntimeOnly(Dependencies.junit5AndroidRunner)
+
+  androidTestImplementation("dnsjava:dnsjava:3.4.3")
 }

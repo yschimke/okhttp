@@ -77,6 +77,8 @@ kotlin {
 
         // graal build support
         compileOnly(Dependencies.nativeImageSvm)
+
+        implementation("dnsjava:dnsjava:3.4.3")
       }
     }
     getByName("jvmTest") {
