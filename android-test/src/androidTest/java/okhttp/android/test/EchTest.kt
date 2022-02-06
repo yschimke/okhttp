@@ -51,8 +51,6 @@ class EchTest() {
   fun testDns() {
     Security.insertProviderAt(Conscrypt.newProviderBuilder().build(), 1)
 
-    val context = ApplicationProvider.getApplicationContext<Context>()
-
     val r: Resolver = SimpleResolver("1.1.1.1")
     val s = LookupSession.defaultBuilder()
       .resolver(r)
@@ -80,29 +78,20 @@ class EchTest() {
         if (echConfig == null) {
           println("Unable to activate ECH for ${sslSocket.inetAddress}")
         } else {
-          val echConfigRData = echConfig.rdataToWireCanonical()
-
           val echConfigEchList = echConfig
             ?.getSvcParamValue(HTTPSRecord.ECH) as SVCBBase.ParameterEch?
 
-          println("HTTPSRecord.ECH rdata")
-          println("Hex " + echConfigRData?.toByteString()?.hex())
-
           println("HTTPSRecord.ECH")
-          println("Hex " + echConfigEchList?.data?.toByteString()?.hex())
-          println("String " + echConfigEchList?.data?.decodeToString())
+          val data = echConfigEchList?.data
+          println("Base 64 " + data?.toByteString()?.base64())
 
-          val echConfigList = getEchConfigListFromDnsRR.invoke(null, echConfigRData) as ByteArray?
+          // val echConfigList = getEchConfigListFromDnsRR.invoke(null, echConfig.rdataToWireCanonical()) as ByteArray?
 
-          println("getEchConfigListFromDnsRR")
-          println("Hex " + echConfigEchList?.data?.toByteString()?.hex())
-          println("String " + echConfigEchList?.data?.decodeToString())
-
-          if (echConfigList == null) {
+          if (data == null) {
             println("Unable to extract echConfigList from $echConfig")
           } else {
             Conscrypt.setUseEchGrease(sslSocket, false)
-            Conscrypt.setEchConfigList(sslSocket, echConfigList)
+            Conscrypt.setEchConfigList(sslSocket, data)
             Conscrypt.setCheckDnsForEch(sslSocket, true)
           }
         }
@@ -116,7 +105,9 @@ class EchTest() {
       .connectionSpecs(listOf(ConnectionSpec.RESTRICTED_TLS))
       .eventListener(object : EventListener() {
         override fun connectionAcquired(call: Call, connection: Connection) {
-          println("ECH was active " + Conscrypt.echAccepted(connection.socket() as SSLSocket))
+          val sslSocket = connection.socket() as SSLSocket
+          println(sslSocket.inetAddress)
+          println("ECH was active " + Conscrypt.echAccepted(sslSocket))
         }
       })
       .sslSocketFactory(sslf2, tm)

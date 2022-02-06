@@ -23,6 +23,7 @@ import okhttp3.Dns
 import org.xbill.DNS.ARecord
 import org.xbill.DNS.HTTPSRecord
 import org.xbill.DNS.Name
+import org.xbill.DNS.SVCBBase
 import org.xbill.DNS.Type
 import org.xbill.DNS.lookup.LookupSession
 
@@ -39,19 +40,19 @@ class DnsJavaDns(val s: LookupSession) : Dns {
     val resultA = s.lookupAsync(mxLookup, Type.A).toCompletableFuture()
     val resultAAAA = s.lookupAsync(mxLookup, Type.AAAA).toCompletableFuture()
 
-    println(resultAAAA.get())
-    println(resultA.get())
+    // println(resultAAAA.get())
+    // println(resultA.get())
     println(resultHTTPS.get())
 
     val https = resultHTTPS.get().records.firstOrNull() as HTTPSRecord?
 
-    if (https != null) {
+    return if (https != null) {
       httpsRecords[hostname] = https
+      (https.getSvcParamValue(HTTPSRecord.IPV4HINT) as SVCBBase.ParameterIpv4Hint).addresses
     } else {
       println("No HTTPS record for $hostname")
+      // resultAAAA.get().records.map { (it as AAAARecord).address } +
+      resultA.get().records.map { (it as ARecord).address }
     }
-
-    // resultAAAA.get().records.map { (it as AAAARecord).address } +
-    return resultA.get().records.map { (it as ARecord).address }
   }
 }
