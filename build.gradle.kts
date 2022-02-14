@@ -94,7 +94,7 @@ subprojects {
 
   val checkstyleConfig: Configuration by configurations.creating
   dependencies {
-    checkstyleConfig("com.puppycrawl.tools:checkstyle:9.2") {
+    checkstyleConfig("com.puppycrawl.tools:checkstyle:9.3") {
       isTransitive = false
     }
   }
