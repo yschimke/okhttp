@@ -37,7 +37,7 @@ codehaus-signature-java18 = "org.codehaus.mojo.signature:java18:1.0"
 conscrypt-android = { module = "org.conscrypt:conscrypt-android", version.ref = "org-conscrypt" }
 conscrypt-openjdk = { module = "org.conscrypt:conscrypt-openjdk-uber", version.ref = "org-conscrypt" }
 dokka-base = { module = "org.jetbrains.dokka:dokka-base", version.ref = "org-jetbrains-dokka" }
-eclipse-jetty-client = "org.eclipse.jetty:jetty-client:9.4.27.v20200227"
+eclipse-jetty-client = "org.eclipse.jetty:jetty-client:9.4.45.v20220203"
 eclipse-osgi = { module = "org.eclipse.platform:org.eclipse.osgi", version.ref = "org-eclipse-platform" }
 equinox = { module = "org.eclipse.platform:org.eclipse.osgi", version.ref = "org-eclipse-platform" }
 findbugs-jsr305 = "com.google.code.findbugs:jsr305:3.0.2"
