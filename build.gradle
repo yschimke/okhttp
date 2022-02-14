@@ -109,7 +109,7 @@ allprojects {
   group = 'com.squareup.okhttp3'
   project.ext.artifactId = rootProject.ext.publishedArtifactId(project)
   version = '4.10.0-SNAPSHOT'
-  
+
   repositories {
     mavenCentral()
     maven {
