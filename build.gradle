@@ -109,6 +109,14 @@ allprojects {
   group = 'com.squareup.okhttp3'
   project.ext.artifactId = rootProject.ext.publishedArtifactId(project)
   version = '4.10.0-SNAPSHOT'
+  
+  repositories {
+    mavenCentral()
+    maven {
+      url 'https://dl.bintray.com/kotlin/dokka'
+    }
+    google()
+  }
 
   task downloadDependencies() {
     description 'Download all dependencies to the Gradle cache'
