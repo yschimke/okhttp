@@ -156,7 +156,6 @@ subprojects { project ->
   java {
     toolchain {
       languageVersion = JavaLanguageVersion.of(11)
-      vendor = JvmVendorSpec.ADOPTOPENJDK
     }
   }
 
@@ -207,7 +206,6 @@ subprojects { project ->
 
     javaLauncher = javaToolchains.launcherFor {
       languageVersion = JavaLanguageVersion.of(testJavaVersion)
-      vendor = JvmVendorSpec.ADOPTOPENJDK
     }
 
     maxParallelForks Runtime.runtime.availableProcessors() * 2
