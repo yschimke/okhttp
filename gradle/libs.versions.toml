@@ -58,7 +58,7 @@ gradleplugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", ve
 gradleplugin-littlerobots-vcu = "nl.littlerobots.vcu:plugin:0.3.0"
 gradleplugin-mannodermaus-androidjunit5 = "de.mannodermaus.gradle.plugins:android-junit5:1.8.2.0"
 gradleplugin-palantir-graal = "gradle.plugin.com.palantir.graal:gradle-graal:0.10.0"
-gradleplugin-spotless = "com.diffplug.spotless:spotless-plugin-gradle:6.2.2"
+gradleplugin-spotless = "com.diffplug.spotless:spotless-plugin-gradle:6.3.0"
 gradleplugin-vanniktech = "com.vanniktech:gradle-maven-publish-plugin:0.18.0"
 guava-jre = "com.google.guava:guava:31.0.1-jre"
 hamcrest-library = "org.hamcrest:hamcrest-library:2.2"
