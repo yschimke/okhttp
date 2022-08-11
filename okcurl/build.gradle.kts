@@ -13,15 +13,18 @@ plugins {
 }
 
 kotlin {
-  jvm {
-    withJava()
-  }
+  jvm()
 
   sourceSets {
     all {
       languageSettings.optIn("kotlin.RequiresOptIn")
     }
 
+    val commonTest by getting {
+      dependencies {
+        implementation(kotlin("test"))
+      }
+    }
     val jvmMain by getting {
       kotlin.srcDir("$buildDir/generated/resources-templates")
 
@@ -36,11 +39,8 @@ kotlin {
 
     val jvmTest by getting {
       dependencies {
-        dependsOn(jvmMain)
         implementation(projects.okhttpTestingSupport)
         api(libs.squareup.okio)
-        implementation(libs.kotlin.test.common)
-        implementation(libs.kotlin.test.annotations)
         api(libs.assertk)
       }
     }
