@@ -12,6 +12,7 @@ tasks.withType<Test> {
 
 dependencies {
   api(projects.okhttp)
+  api(projects.okhttpTls)
 
   testImplementation(projects.okhttpTestingSupport)
   testImplementation(libs.junit.jupiter.api)

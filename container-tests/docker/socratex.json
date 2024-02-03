@@ -1,0 +1,13 @@
+{
+    "domain": "localhost",
+    "token": "9005d9c0-ee35-9faa-e318-14ffd5d45dfa",
+    "user": "admin",
+    "password": "password",
+    "cert": null,
+    "securityLog": {
+        "::ffff:172.17.0.1": {
+            "lastVisit": "2024-02-03T21:26:38.987Z"
+        }
+    },
+    "bypassList": {}
+}

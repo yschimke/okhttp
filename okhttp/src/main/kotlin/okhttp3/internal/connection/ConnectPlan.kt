@@ -159,10 +159,12 @@ class ConnectPlan(
     call.plansToCancel += this
     try {
       if (tunnelRequest != null) {
+        println(tunnelRequest)
         val tunnelResult = connectTunnel()
 
         // Tunnel didn't work. Start it all again.
         if (tunnelResult.nextPlan != null || tunnelResult.throwable != null) {
+          println("failed")
           return tunnelResult
         }
       }
@@ -172,9 +174,9 @@ class ConnectPlan(
         // that happens, then we will have buffered bytes that are needed by the SSLSocket!
         // This check is imperfect: it doesn't tell us whether a handshake will succeed, just
         // that it will almost certainly fail because the proxy has sent unexpected data.
-        if (source?.buffer?.exhausted() == false || sink?.buffer?.exhausted() == false) {
-          throw IOException("TLS tunnel buffered too many bytes!")
-        }
+//        if (source?.buffer?.exhausted() == false || sink?.buffer?.exhausted() == false) {
+//          throw IOException("TLS tunnel buffered too many bytes!")
+//        }
 
         eventListener.secureConnectStart(call)
 
@@ -438,14 +440,15 @@ class ConnectPlan(
           .build()
       tunnelCodec.skipConnectBody(response)
 
+      println(response.code)
       when (response.code) {
         HttpURLConnection.HTTP_OK -> return null
 
-        HttpURLConnection.HTTP_PROXY_AUTH -> {
+        HttpURLConnection.HTTP_PROXY_AUTH, HttpURLConnection.HTTP_UNAUTHORIZED -> {
           nextRequest = route.address.proxyAuthenticator.authenticate(route, response)
             ?: throw IOException("Failed to authenticate with proxy")
 
-          if ("close".equals(response.header("Connection"), ignoreCase = true)) {
+          if ("close".equals(response.header("Proxy-Connection"), ignoreCase = true)) {
             return nextRequest
           }
         }
