@@ -26,6 +26,7 @@ import okhttp3.HttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
+import okhttp3.internal.http.HTTP_PROXY_AUTH
 
 /**
  * Adapts [Authenticator] to [okhttp3.Authenticator]. Configure OkHttp to use [Authenticator] with
@@ -40,7 +41,7 @@ class JavaNetAuthenticator(private val defaultDns: Dns = Dns.SYSTEM) : okhttp3.A
     val challenges = response.challenges()
     val request = response.request
     val url = request.url
-    val proxyAuthorization = response.code == 407
+    val proxyAuthorization = response.code == HTTP_PROXY_AUTH
     val proxy = route?.proxy ?: Proxy.NO_PROXY
 
     for (challenge in challenges) {
