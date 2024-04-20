@@ -19,7 +19,6 @@ import assertk.assertFailure
 import assertk.assertions.hasMessage
 import assertk.assertions.isInstanceOf
 import java.net.UnknownHostException
-import okhttp3.AsyncDns
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -38,7 +37,7 @@ class AndroidAsyncDnsTest {
       throw IllegalArgumentException("Network.fromNetworkHandle refusing to instantiate NETID_UNSET Network.")
     }
 
-    val dns = AsyncDns.toDns(asyncDns)
+    val dns = asyncDns.asBlocking()
 
     assertFailure {
       dns.lookup("google.invalid")

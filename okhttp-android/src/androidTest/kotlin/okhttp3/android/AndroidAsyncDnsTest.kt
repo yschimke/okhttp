@@ -73,7 +73,7 @@ class AndroidAsyncDnsTest {
 
     client =
       OkHttpClient.Builder()
-        .dns(AsyncDns.toDns(AndroidAsyncDns.IPv4, AndroidAsyncDns.IPv6))
+        .dns(AndroidAsyncDns.DEFAULT.asBlocking())
         .sslSocketFactory(localhost.sslSocketFactory(), localhost.trustManager)
         .build()
 
@@ -131,24 +131,32 @@ class AndroidAsyncDnsTest {
 
     // assumes an IPv4 address
     AndroidAsyncDns.IPv4.query(
-      hostname,
-      object : AsyncDns.Callback {
-        override fun onResponse(
-          hostname: String,
-          addresses: List<InetAddress>,
-        ) {
-          allAddresses.addAll(addresses)
-          latch.countDown()
-        }
+      hostname = hostname,
+      originatingCall = null,
+      callback =
+        object : AsyncDns.Callback {
+          override fun onAddresses(
+            hasMore: Boolean,
+            hostname: String,
+            addresses: List<InetAddress>,
+          ) {
+            allAddresses.addAll(addresses)
+            if (!hasMore) {
+              latch.countDown()
+            }
+          }
 
-        override fun onFailure(
-          hostname: String,
-          e: IOException,
-        ) {
-          exception = e
-          latch.countDown()
-        }
-      },
+          override fun onFailure(
+            hasMore: Boolean,
+            hostname: String,
+            e: IOException,
+          ) {
+            exception = e
+            if (!hasMore) {
+              latch.countDown()
+            }
+          }
+        },
     )
 
     latch.await()
@@ -187,7 +195,7 @@ class AndroidAsyncDnsTest {
 
     val client =
       OkHttpClient.Builder()
-        .dns(AsyncDns.toDns(AndroidAsyncDns.IPv4, AndroidAsyncDns.IPv6))
+        .dns(AndroidAsyncDns.DEFAULT.asBlocking())
         .socketFactory(network.socketFactory)
         .build()
 

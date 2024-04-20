@@ -18,8 +18,8 @@
 package okhttp3
 
 import java.net.InetAddress
-import java.net.UnknownHostException
-import java.util.concurrent.CountDownLatch
+import okhttp3.internal.dns.BlockingAsyncDns
+import okhttp3.internal.dns.CombinedAsyncDns
 import okio.IOException
 
 /**
@@ -39,8 +39,14 @@ interface AsyncDns {
    */
   fun query(
     hostname: String,
+    originatingCall: Call?,
     callback: Callback,
   )
+
+  /** Returns a [Dns] that blocks until all async results are available. */
+  open fun asBlocking(): Dns {
+    return BlockingAsyncDns(this)
+  }
 
   /**
    * Callback to receive results from the DNS Queries.
@@ -48,18 +54,24 @@ interface AsyncDns {
   @ExperimentalOkHttpApi
   interface Callback {
     /**
-     * Return addresses for a dns query for a single class of IPv4 (A) or IPv6 (AAAA).
-     * May be an empty list indicating that the host is unreachable.
+     * Invoked on a successful result from a single lookup step.
+     *
+     * @param addresses a non-empty list of addresses
+     * @param hasMore true if another call to onAddresses or onFailure will be made
      */
-    fun onResponse(
+    fun onAddresses(
+      hasMore: Boolean,
       hostname: String,
       addresses: List<InetAddress>,
     )
 
     /**
-     * Returns an error for the DNS query.
+     * Invoked on a failed result from a single lookup step.
+     *
+     * @param hasMore true if another call to onAddresses or onFailure will be made
      */
     fun onFailure(
+      hasMore: Boolean,
       hostname: String,
       e: IOException,
     )
@@ -81,56 +93,20 @@ interface AsyncDns {
     const val TYPE_AAAA = 28
 
     /**
-     * Adapt an AsyncDns implementation to Dns, waiting until onComplete is received
-     * and returning results if available.
+     * Returns an [AsyncDns] that queries all [sources] in parallel, and calls
+     * the callback for each partial result.
+     *
+     * The callback will be passed `hasMore = false` only when all sources
+     * have no more results.
+     *
+     * @param sources one or more AsyncDns sources to query.
      */
-    fun toDns(vararg asyncDns: AsyncDns): Dns =
-      Dns { hostname ->
-        val allAddresses = mutableListOf<InetAddress>()
-        val allExceptions = mutableListOf<IOException>()
-        val latch = CountDownLatch(asyncDns.size)
-
-        asyncDns.forEach {
-          it.query(
-            hostname,
-            object : Callback {
-              override fun onResponse(
-                hostname: String,
-                addresses: List<InetAddress>,
-              ) {
-                synchronized(allAddresses) {
-                  allAddresses.addAll(addresses)
-                }
-                latch.countDown()
-              }
-
-              override fun onFailure(
-                hostname: String,
-                e: IOException,
-              ) {
-                synchronized(allExceptions) {
-                  allExceptions.add(e)
-                }
-                latch.countDown()
-              }
-            },
-          )
-        }
-
-        latch.await()
-
-        // No mutations should be possible after this point
-        if (allAddresses.isEmpty()) {
-          val first = allExceptions.firstOrNull() ?: UnknownHostException("No results for $hostname")
-
-          allExceptions.drop(1).forEach {
-            first.addSuppressed(it)
-          }
-
-          throw first
-        }
-
-        allAddresses
+    fun union(vararg sources: AsyncDns): AsyncDns {
+      return if (sources.size == 1) {
+        sources.first()
+      } else {
+        CombinedAsyncDns(sources.toList())
       }
+    }
   }
 }
