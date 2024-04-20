@@ -31,18 +31,19 @@ public abstract interface class okhttp3/AsyncDns {
 	public static final field Companion Lokhttp3/AsyncDns$Companion;
 	public static final field TYPE_A I
 	public static final field TYPE_AAAA I
-	public abstract fun query (Ljava/lang/String;Lokhttp3/AsyncDns$Callback;)V
+	public fun asBlocking ()Lokhttp3/Dns;
+	public abstract fun query (Ljava/lang/String;Lokhttp3/Call;Lokhttp3/AsyncDns$Callback;)V
 }
 
 public abstract interface class okhttp3/AsyncDns$Callback {
-	public abstract fun onFailure (Ljava/lang/String;Ljava/io/IOException;)V
-	public abstract fun onResponse (Ljava/lang/String;Ljava/util/List;)V
+	public abstract fun onAddresses (ZLjava/lang/String;Ljava/util/List;)V
+	public abstract fun onFailure (ZLjava/lang/String;Ljava/io/IOException;)V
 }
 
 public final class okhttp3/AsyncDns$Companion {
 	public static final field TYPE_A I
 	public static final field TYPE_AAAA I
-	public final fun toDns ([Lokhttp3/AsyncDns;)Lokhttp3/Dns;
+	public final fun union ([Lokhttp3/AsyncDns;)Lokhttp3/AsyncDns;
 }
 
 public final class okhttp3/AsyncDns$DnsClass : java/lang/Enum {
