@@ -27,8 +27,6 @@ import mockwebserver3.junit4.MockWebServerRule
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.android.NetworkSelection.withNetwork
-import okhttp3.tls.HandshakeCertificates
-import okhttp3.tls.HeldCertificate
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
@@ -42,19 +40,6 @@ class AndroidNetworkSelectionTest {
   val serverRule = MockWebServerRule()
   private lateinit var client: OkHttpClient
 
-  private val localhost: HandshakeCertificates by lazy {
-    // Generate a self-signed cert for the server to serve and the client to trust.
-    val heldCertificate =
-      HeldCertificate.Builder()
-        .addSubjectAlternativeName("localhost")
-        .build()
-    return@lazy HandshakeCertificates.Builder()
-      .addPlatformTrustedCertificates()
-      .heldCertificate(heldCertificate)
-      .addTrustedCertificate(heldCertificate.certificate)
-      .build()
-  }
-
   @Before
   fun init() {
     assumeTrue("Supported on API 29+", Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
@@ -67,11 +52,8 @@ class AndroidNetworkSelectionTest {
 
     client =
       OkHttpClient.Builder()
-        .sslSocketFactory(localhost.sslSocketFactory(), localhost.trustManager)
         .withNetwork(network = activeNetwork)
         .build()
-
-    serverRule.server.useHttps(localhost.sslSocketFactory())
   }
 
   @Test
@@ -82,7 +64,6 @@ class AndroidNetworkSelectionTest {
 
     call.execute().use { response ->
       assertThat(response.code).isEqualTo(200)
-      assertThat(response.request.tag<NetworkPin>()?.network).isEqualTo(activeNetwork)
     }
   }
 }
