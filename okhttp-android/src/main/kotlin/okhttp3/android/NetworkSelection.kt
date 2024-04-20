@@ -19,29 +19,20 @@ import android.net.Network
 import android.os.Build
 import androidx.annotation.RequiresApi
 import javax.net.SocketFactory
+import okhttp3.Dns
 import okhttp3.ExperimentalOkHttpApi
 import okhttp3.OkHttpClient
-import okhttp3.android.internal.NetworkPinInterceptor
 
 @ExperimentalOkHttpApi
 object NetworkSelection {
   @RequiresApi(Build.VERSION_CODES.Q)
   fun OkHttpClient.Builder.withNetwork(network: Network?): OkHttpClient.Builder {
-    interceptors().apply {
-      removeIf { it is NetworkPinInterceptor }
-    }
-
     return if (network == null) {
-      dns(AndroidAsyncDns.DEFAULT.asBlocking())
+      dns(Dns.ANDROID)
         .socketFactory(SocketFactory.getDefault())
     } else {
-      dns(AndroidAsyncDns.forNetwork(network).asBlocking())
+      dns(Dns.forNetwork(network))
         .socketFactory(AndroidSocketFactory(network))
-        .apply {
-          interceptors().apply {
-            add(0, NetworkPinInterceptor(network))
-          }
-        }
     }
   }
 }

@@ -26,7 +26,10 @@ import java.net.UnknownHostException
 import java.util.concurrent.Executors
 import okhttp3.AsyncDns
 import okhttp3.Call
+import okhttp3.Dns
 import okhttp3.ExperimentalOkHttpApi
+import okhttp3.android.AndroidAsyncDns.Companion.IPv4
+import okhttp3.android.AndroidAsyncDns.Companion.IPv6
 
 /**
  * DNS implementation based on android.net.DnsResolver, which submits a request for
@@ -100,8 +103,6 @@ class AndroidAsyncDns(
     @RequiresApi(Build.VERSION_CODES.Q)
     val IPv6 = AndroidAsyncDns(dnsClass = AsyncDns.DnsClass.IPV6)
 
-    val DEFAULT: AsyncDns = AsyncDns.union(IPv4, IPv6)
-
     fun forNetwork(network: Network): AsyncDns {
       return AsyncDns.union(
         AndroidAsyncDns(dnsClass = AsyncDns.DnsClass.IPV4, network = network),
@@ -110,3 +111,10 @@ class AndroidAsyncDns(
     }
   }
 }
+
+val Dns.Companion.ANDROID: Dns
+  @RequiresApi(Build.VERSION_CODES.Q)
+  get() = AsyncDns.union(IPv4, IPv6).asBlocking()
+
+@RequiresApi(Build.VERSION_CODES.Q)
+fun Dns.Companion.forNetwork(network: Network): Dns = AndroidAsyncDns.forNetwork(network).asBlocking()

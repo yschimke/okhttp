@@ -16,7 +16,7 @@
 package okhttp3.android
 
 import android.net.Network
-import android.net.TrafficStats
+import android.os.Build
 import java.net.InetAddress
 import java.net.Socket
 import javax.net.SocketFactory
@@ -32,12 +32,7 @@ class AndroidSocketFactory(
     host: String?,
     port: Int,
   ): Socket {
-    return socketFactory.createSocket(host, port).also { configure(it) }
-  }
-
-  private fun configure(it: Socket) {
-    println("Tagging socket on ${Thread.currentThread().name}")
-    TrafficStats.tagSocket(it)
+    return socketFactory.createSocket(host, port)
   }
 
   override fun createSocket(
@@ -46,14 +41,14 @@ class AndroidSocketFactory(
     localHost: InetAddress?,
     localPort: Int,
   ): Socket {
-    return socketFactory.createSocket(host, port, localHost, localPort).also { configure(it) }
+    return socketFactory.createSocket(host, port, localHost, localPort)
   }
 
   override fun createSocket(
     host: InetAddress?,
     port: Int,
   ): Socket {
-    return socketFactory.createSocket(host, port).also { configure(it) }
+    return socketFactory.createSocket(host, port)
   }
 
   override fun createSocket(
@@ -62,11 +57,15 @@ class AndroidSocketFactory(
     localAddress: InetAddress?,
     localPort: Int,
   ): Socket {
-    return socketFactory.createSocket(address, port, localAddress, localPort).also { configure(it) }
+    return socketFactory.createSocket(address, port, localAddress, localPort)
   }
 
   override fun hashCode(): Int {
-    return network.networkHandle.hashCode()
+    return if (Build.VERSION.SDK_INT >= 23) {
+      network.networkHandle.hashCode()
+    } else {
+      network.toString().hashCode()
+    }
   }
 
   override fun equals(other: Any?): Boolean {

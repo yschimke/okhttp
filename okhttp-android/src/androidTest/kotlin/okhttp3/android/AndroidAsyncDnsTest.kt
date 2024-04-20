@@ -33,6 +33,7 @@ import java.util.concurrent.CountDownLatch
 import mockwebserver3.MockResponse
 import mockwebserver3.junit4.MockWebServerRule
 import okhttp3.AsyncDns
+import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -73,7 +74,7 @@ class AndroidAsyncDnsTest {
 
     client =
       OkHttpClient.Builder()
-        .dns(AndroidAsyncDns.DEFAULT.asBlocking())
+        .dns(Dns.ANDROID)
         .sslSocketFactory(localhost.sslSocketFactory(), localhost.trustManager)
         .build()
 
@@ -195,7 +196,7 @@ class AndroidAsyncDnsTest {
 
     val client =
       OkHttpClient.Builder()
-        .dns(AndroidAsyncDns.DEFAULT.asBlocking())
+        .dns(Dns.ANDROID)
         .socketFactory(network.socketFactory)
         .build()
 
