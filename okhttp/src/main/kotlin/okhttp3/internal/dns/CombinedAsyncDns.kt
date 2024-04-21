@@ -27,41 +27,41 @@ internal class CombinedAsyncDns(val dnsList: List<AsyncDns>) : AsyncDns {
     callback: AsyncDns.Callback,
   ) {
     var remainingQueries = dnsList.size
+    val lock = Any()
 
     dnsList.forEach {
       it.query(
         hostname = hostname,
         originatingCall = originatingCall,
-        callback =
-          object : AsyncDns.Callback {
-            override fun onAddresses(
-              hasMore: Boolean,
-              hostname: String,
-              addresses: List<InetAddress>,
-            ) {
-              synchronized(this) {
-                if (!hasMore) {
-                  remainingQueries -= 1
-                }
-
-                callback.onAddresses(remainingQueries == 0, hostname, addresses)
+        callback = object : AsyncDns.Callback {
+          override fun onAddresses(
+            hasMore: Boolean,
+            hostname: String,
+            addresses: List<InetAddress>,
+          ) {
+            synchronized(lock) {
+              if (!hasMore) {
+                remainingQueries -= 1
               }
+
+              callback.onAddresses(hasMore = remainingQueries > 0, hostname = hostname, addresses = addresses)
             }
+          }
 
-            override fun onFailure(
-              hasMore: Boolean,
-              hostname: String,
-              e: IOException,
-            ) {
-              synchronized(this) {
-                if (!hasMore) {
-                  remainingQueries -= 1
-                }
-
-                callback.onFailure(remainingQueries == 0, hostname, e)
+          override fun onFailure(
+            hasMore: Boolean,
+            hostname: String,
+            e: IOException,
+          ) {
+            synchronized(lock) {
+              if (!hasMore) {
+                remainingQueries -= 1
               }
+
+              callback.onFailure(hasMore = remainingQueries > 0, hostname = hostname, e = e)
             }
-          },
+          }
+        },
       )
     }
   }
