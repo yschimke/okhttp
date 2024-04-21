@@ -208,11 +208,13 @@ class AndroidAsyncDnsTest {
     }
   }
 
-  private fun assumeNetwork() {
-    try {
-      InetAddress.getByName("www.google.com")
-    } catch (uhe: UnknownHostException) {
-      throw AssumptionViolatedException(uhe.message, uhe)
+  companion object {
+    fun assumeNetwork() {
+      try {
+        InetAddress.getByName("www.google.com")
+      } catch (uhe: UnknownHostException) {
+        throw AssumptionViolatedException(uhe.message, uhe)
+      }
     }
   }
 }

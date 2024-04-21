@@ -22,63 +22,39 @@ import android.os.Build
 import androidx.test.platform.app.InstrumentationRegistry
 import assertk.assertThat
 import assertk.assertions.isEqualTo
-import mockwebserver3.MockResponse
-import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.android.AndroidAsyncDnsTest.Companion.assumeNetwork
 import okhttp3.android.NetworkSelection.withNetwork
-import okhttp3.tls.HandshakeCertificates
-import okhttp3.tls.HeldCertificate
 import org.junit.Assume.assumeTrue
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
 
 class AndroidNetworkSelectionTest {
-  private var activeNetwork: Network? = null
+  private var workingNetwork: Network? = null
 
-  @JvmField
-  @Rule
-  val serverRule = MockWebServerRule()
   private lateinit var client: OkHttpClient
-
-  private val localhost: HandshakeCertificates by lazy {
-    // Generate a self-signed cert for the server to serve and the client to trust.
-    val heldCertificate =
-      HeldCertificate.Builder()
-        .addSubjectAlternativeName("localhost")
-        .build()
-    return@lazy HandshakeCertificates.Builder()
-      .addPlatformTrustedCertificates()
-      .heldCertificate(heldCertificate)
-      .addTrustedCertificate(heldCertificate.certificate)
-      .build()
-  }
 
   @Before
   fun init() {
     assumeTrue("Supported on API 29+", Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+    assumeNetwork()
 
     val connectivityManager =
       InstrumentationRegistry.getInstrumentation().context.getSystemService(ConnectivityManager::class.java)
 
-    activeNetwork = connectivityManager.activeNetwork
-    assumeTrue(activeNetwork != null)
+    workingNetwork = connectivityManager.activeNetwork
 
-    client =
-      OkHttpClient.Builder()
-        .sslSocketFactory(localhost.sslSocketFactory(), localhost.trustManager)
-        .withNetwork(network = activeNetwork)
-        .build()
+    assumeTrue(workingNetwork != null)
 
-    serverRule.server.useHttps(localhost.sslSocketFactory())
+    client = OkHttpClient.Builder()
+      .withNetwork(network = workingNetwork).build()
   }
 
   @Test
   fun testRequest() {
-    serverRule.server.enqueue(MockResponse())
-
-    val call = client.newCall(Request(serverRule.server.url("/")))
+    val call = client.newCall(Request("https://www.google.com/robots.txt".toHttpUrl()))
 
     call.execute().use { response ->
       assertThat(response.code).isEqualTo(200)
