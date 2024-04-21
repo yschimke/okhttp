@@ -28,6 +28,10 @@ class AndroidSocketFactory(
 ) : SocketFactory() {
   private val socketFactory: SocketFactory = network.socketFactory
 
+  override fun createSocket(): Socket {
+    return socketFactory.createSocket()
+  }
+
   override fun createSocket(
     host: String?,
     port: Int,
