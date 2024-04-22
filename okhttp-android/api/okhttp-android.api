@@ -1,17 +1,4 @@
-public final class okhttp3/android/AndroidAsyncDns : okhttp3/AsyncDns {
-	public static final field Companion Lokhttp3/android/AndroidAsyncDns$Companion;
-	public fun <init> (Lokhttp3/AsyncDns$DnsClass;Landroid/net/Network;)V
-	public synthetic fun <init> (Lokhttp3/AsyncDns$DnsClass;Landroid/net/Network;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public fun query (Ljava/lang/String;Lokhttp3/Call;Lokhttp3/AsyncDns$Callback;)V
-}
-
-public final class okhttp3/android/AndroidAsyncDns$Companion {
-	public final fun forNetwork (Landroid/net/Network;)Lokhttp3/AsyncDns;
-	public final fun getIPv4 ()Lokhttp3/android/AndroidAsyncDns;
-	public final fun getIPv6 ()Lokhttp3/android/AndroidAsyncDns;
-}
-
-public final class okhttp3/android/AndroidAsyncDnsKt {
+public final class okhttp3/android/AndroidDnsKt {
 	public static final fun forNetwork (Lokhttp3/Dns$Companion;Landroid/net/Network;)Lokhttp3/Dns;
 	public static final fun getANDROID (Lokhttp3/Dns$Companion;)Lokhttp3/Dns;
 }

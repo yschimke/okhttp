@@ -13,10 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package okhttp3.internal.dns
+package okhttp3.android.internal
 
 import java.net.InetAddress
-import okhttp3.AsyncDns
 import okhttp3.Call
 import okio.IOException
 
@@ -64,6 +63,25 @@ internal class CombinedAsyncDns(val dnsList: List<AsyncDns>) : AsyncDns {
             }
           },
       )
+    }
+  }
+
+  companion object {
+    /**
+     * Returns an [AsyncDns] that queries all [sources] in parallel, and calls
+     * the callback for each partial result.
+     *
+     * The callback will be passed `hasMore = false` only when all sources
+     * have no more results.
+     *
+     * @param sources one or more AsyncDns sources to query.
+     */
+    fun union(vararg sources: AsyncDns): AsyncDns {
+      return if (sources.size == 1) {
+        sources.first()
+      } else {
+        CombinedAsyncDns(sources.toList())
+      }
     }
   }
 }

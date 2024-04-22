@@ -13,13 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package okhttp3.internal.dns
+package okhttp3.android.internal
 
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
-import okhttp3.AsyncDns
 import okhttp3.Dns
 import okio.IOException
 
@@ -74,5 +73,12 @@ internal class BlockingAsyncDns(val asyncDns: AsyncDns) : Dns {
     }
 
     return allAddresses.toList()
+  }
+
+  companion object {
+    /** Returns a [Dns] that blocks until all async results are available. */
+    open fun AsyncDns.asBlocking(): Dns {
+      return BlockingAsyncDns(this)
+    }
   }
 }

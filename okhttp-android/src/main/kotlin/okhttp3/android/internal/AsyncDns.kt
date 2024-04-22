@@ -15,11 +15,11 @@
  *
  */
 
-package okhttp3
+package okhttp3.android.internal
 
 import java.net.InetAddress
-import okhttp3.internal.dns.BlockingAsyncDns
-import okhttp3.internal.dns.CombinedAsyncDns
+import okhttp3.Call
+import okhttp3.ExperimentalOkHttpApi
 import okio.IOException
 
 /**
@@ -33,7 +33,7 @@ import okio.IOException
  * Implementations of this interface must be safe for concurrent use.
  */
 @ExperimentalOkHttpApi
-interface AsyncDns {
+internal interface AsyncDns {
   /**
    * Query DNS records for `hostname`, in the order they are received.
    */
@@ -42,11 +42,6 @@ interface AsyncDns {
     originatingCall: Call?,
     callback: Callback,
   )
-
-  /** Returns a [Dns] that blocks until all async results are available. */
-  open fun asBlocking(): Dns {
-    return BlockingAsyncDns(this)
-  }
 
   /**
    * Callback to receive results from the DNS Queries.
@@ -75,38 +70,5 @@ interface AsyncDns {
       hostname: String,
       e: IOException,
     )
-  }
-
-  /**
-   * Class of DNS addresses, such that clients that treat these differently, such
-   * as attempting IPv6 first, can make such decisions.
-   */
-  @ExperimentalOkHttpApi
-  enum class DnsClass(val type: Int) {
-    IPV4(TYPE_A),
-    IPV6(TYPE_AAAA),
-  }
-
-  @ExperimentalOkHttpApi
-  companion object {
-    const val TYPE_A = 1
-    const val TYPE_AAAA = 28
-
-    /**
-     * Returns an [AsyncDns] that queries all [sources] in parallel, and calls
-     * the callback for each partial result.
-     *
-     * The callback will be passed `hasMore = false` only when all sources
-     * have no more results.
-     *
-     * @param sources one or more AsyncDns sources to query.
-     */
-    fun union(vararg sources: AsyncDns): AsyncDns {
-      return if (sources.size == 1) {
-        sources.first()
-      } else {
-        CombinedAsyncDns(sources.toList())
-      }
-    }
   }
 }

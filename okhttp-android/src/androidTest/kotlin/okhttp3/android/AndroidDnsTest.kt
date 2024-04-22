@@ -50,7 +50,7 @@ import org.junit.Test
 /**
  * Run with "./gradlew :android-test:connectedCheck -PandroidBuild=true" and make sure ANDROID_SDK_ROOT is set.
  */
-class AndroidAsyncDnsTest {
+class AndroidDnsTest {
   @JvmField @Rule
   val serverRule = MockWebServerRule()
   private lateinit var client: OkHttpClient
@@ -131,7 +131,7 @@ class AndroidAsyncDnsTest {
     val latch = CountDownLatch(1)
 
     // assumes an IPv4 address
-    AndroidAsyncDns.IPv4.query(
+    AndroidDns.IPv4.query(
       hostname = hostname,
       originatingCall = null,
       callback =
