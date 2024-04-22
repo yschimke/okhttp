@@ -33,35 +33,36 @@ internal class CombinedAsyncDns(val dnsList: List<AsyncDns>) : AsyncDns {
       it.query(
         hostname = hostname,
         originatingCall = originatingCall,
-        callback = object : AsyncDns.Callback {
-          override fun onAddresses(
-            hasMore: Boolean,
-            hostname: String,
-            addresses: List<InetAddress>,
-          ) {
-            synchronized(lock) {
-              if (!hasMore) {
-                remainingQueries -= 1
+        callback =
+          object : AsyncDns.Callback {
+            override fun onAddresses(
+              hasMore: Boolean,
+              hostname: String,
+              addresses: List<InetAddress>,
+            ) {
+              synchronized(lock) {
+                if (!hasMore) {
+                  remainingQueries -= 1
+                }
+
+                callback.onAddresses(hasMore = remainingQueries > 0, hostname = hostname, addresses = addresses)
               }
-
-              callback.onAddresses(hasMore = remainingQueries > 0, hostname = hostname, addresses = addresses)
             }
-          }
 
-          override fun onFailure(
-            hasMore: Boolean,
-            hostname: String,
-            e: IOException,
-          ) {
-            synchronized(lock) {
-              if (!hasMore) {
-                remainingQueries -= 1
+            override fun onFailure(
+              hasMore: Boolean,
+              hostname: String,
+              e: IOException,
+            ) {
+              synchronized(lock) {
+                if (!hasMore) {
+                  remainingQueries -= 1
+                }
+
+                callback.onFailure(hasMore = remainingQueries > 0, hostname = hostname, e = e)
               }
-
-              callback.onFailure(hasMore = remainingQueries > 0, hostname = hostname, e = e)
             }
-          }
-        },
+          },
       )
     }
   }

@@ -48,8 +48,9 @@ class AndroidNetworkSelectionTest {
 
     assumeTrue(workingNetwork != null)
 
-    client = OkHttpClient.Builder()
-      .withNetwork(network = workingNetwork).build()
+    client =
+      OkHttpClient.Builder()
+        .withNetwork(network = workingNetwork).build()
   }
 
   @Test
