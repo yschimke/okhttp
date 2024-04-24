@@ -19,6 +19,7 @@ import assertk.assertFailure
 import assertk.assertions.hasMessage
 import assertk.assertions.isInstanceOf
 import java.net.UnknownHostException
+import okhttp3.android.AndroidDns.DnsClass
 import okhttp3.android.internal.BlockingAsyncDns.Companion.asBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,7 +32,7 @@ import org.robolectric.shadow.api.Shadow
 class AndroidAsyncDnsTest {
   @Test
   fun testDnsRequestInvalid() {
-    val asyncDns = AndroidDns.IPv4
+    val asyncDns = AndroidDns(DnsClass.IPV4)
     val shadowDns: ShadowDnsResolver = Shadow.extract(asyncDns.resolver)
 
     shadowDns.responder = {

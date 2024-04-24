@@ -16,6 +16,7 @@
 package okhttp3.android.internal
 
 import java.net.InetAddress
+import java.net.UnknownHostException
 import okhttp3.Call
 import okio.IOException
 
@@ -27,6 +28,11 @@ internal class CombinedAsyncDns(val dnsList: List<AsyncDns>) : AsyncDns {
   ) {
     var remainingQueries = dnsList.size
     val lock = Any()
+
+    if (dnsList.isEmpty()) {
+      callback.onFailure(false, hostname, UnknownHostException("No configured dns options"))
+      return
+    }
 
     dnsList.forEach {
       it.query(
