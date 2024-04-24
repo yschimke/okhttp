@@ -32,11 +32,11 @@ import java.net.UnknownHostException
 import java.util.concurrent.CountDownLatch
 import mockwebserver3.MockResponse
 import mockwebserver3.junit4.MockWebServerRule
-import okhttp3.AsyncDns
 import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.android.internal.AsyncDns
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import okio.IOException
@@ -131,7 +131,7 @@ class AndroidDnsTest {
     val latch = CountDownLatch(1)
 
     // assumes an IPv4 address
-    AndroidDns.IPv4.query(
+    AndroidDns(AndroidDns.DnsClass.IPV4).query(
       hostname = hostname,
       originatingCall = null,
       callback =
