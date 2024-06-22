@@ -20,41 +20,22 @@ package okhttp3.coroutines
 
 import assertk.assertThat
 import assertk.assertions.isEqualTo
-import assertk.assertions.isTrue
-import java.io.IOException
-import java.util.concurrent.TimeUnit
+import assertk.assertions.isInstanceOf
+import assertk.assertions.isNotNull
 import kotlin.test.assertFailsWith
-import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.job
-import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
-import mockwebserver3.SocketPolicy.DisconnectAfterRequest
-import okhttp3.Callback
-import okhttp3.FailingCall
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Interceptor
 import okhttp3.OkHttpClientTestRule
-import okhttp3.Protocol
 import okhttp3.Request
-import okhttp3.Response
-import okhttp3.ResponseBody
 import okhttp3.SuspendingInterceptor
-import okio.Buffer
-import okio.ForwardingSource
-import okio.buffer
+import okio.IOException
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
-import org.junit.jupiter.api.fail
 
 class SuspendingInterceptorTest {
   @RegisterExtension
@@ -76,7 +57,9 @@ class SuspendingInterceptorTest {
     runTest {
       server.enqueue(MockResponse(body = "abc"))
 
-      client = client.newBuilder().addInterceptor().build()
+      client = client.newBuilder().addInterceptor(SuspendingInterceptor {
+        it.proceedAsync(it.request())
+      }).build()
 
       val call = client.newCall(request)
 
@@ -93,7 +76,9 @@ class SuspendingInterceptorTest {
     runTest {
       server.enqueue(MockResponse(body = "abc"))
 
-      client = client.newBuilder().addNetworkInterceptor().build()
+      client = client.newBuilder().addNetworkInterceptor(SuspendingInterceptor {
+        it.proceedAsync(it.request())
+      }).build()
 
       val call = client.newCall(request)
 
@@ -108,29 +93,16 @@ class SuspendingInterceptorTest {
   @Test
   fun failsOnBlockingCall() {
     runTest {
-      server.enqueue(MockResponse(body = "abc"))
-
-      client = client.newBuilder().addInterceptor().build()
+      client = client.newBuilder().addInterceptor(SuspendingInterceptor {
+        it.proceed(it.request())
+      }).build()
 
       val call = client.newCall(request)
 
-      call.executeAsync().use {
-        withContext(Dispatchers.IO) {
-          assertThat(it.body.string()).isEqualTo("abc")
-        }
+      val failure = assertFailsWith<IOException> {
+        call.executeAsync()
       }
-    }
-  }
-
-  object NoopSuspendingInterceptor: SuspendingInterceptor() {
-    override suspend fun interceptAsync(chain: Interceptor.Chain): Response {
-      return chain.proceedAsync(chain.request())
-    }
-  }
-
-  object BadSuspendingInterceptor: SuspendingInterceptor() {
-    override suspend fun interceptAsync(chain: Interceptor.Chain): Response {
-      return chain.proceed(chain.request())
+//      assertThat(failure.cause).isNotNull().isInstanceOf(IllegalStateException::class)
     }
   }
 }
