@@ -107,6 +107,8 @@ dependencies {
   compileOnly(libs.findbugs.jsr305)
   compileOnly(libs.animalsniffer.annotations)
 
+  implementation(libs.kotlinx.coroutines.core)
+
   // graal build support
   compileOnly(libs.nativeImageSvm)
 
