@@ -1,11 +1,16 @@
 package okhttp3
 
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
 
 abstract class SuspendingInterceptor : Interceptor {
   final override fun intercept(chain: Interceptor.Chain): Response {
     return runBlocking {
-      interceptAsync(AsyncChain(chain))
+      try {
+        interceptAsync(AsyncChain(chain))
+      } catch (ibce: InvalidBlockingCall) {
+        throw CancellationException(ibce)
+      }
     }
   }
 
@@ -34,6 +39,8 @@ abstract class SuspendingInterceptor : Interceptor {
 
 private class AsyncChain(delegate: Interceptor.Chain): Interceptor.Chain by delegate {
   override fun proceed(request: Request): Response {
-    error("Synchronous calls not allowed from SuspendingInterceptor")
+    throw InvalidBlockingCall()
   }
 }
+
+private class InvalidBlockingCall: IllegalStateException("Synchronous calls not allowed from SuspendingInterceptor")

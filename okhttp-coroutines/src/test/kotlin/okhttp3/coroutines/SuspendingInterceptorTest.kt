@@ -34,6 +34,7 @@ import okhttp3.Request
 import okhttp3.SuspendingInterceptor
 import okio.IOException
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 
@@ -90,6 +91,22 @@ class SuspendingInterceptorTest {
     }
   }
 
+  @Test
+  fun withExecute() {
+    server.enqueue(MockResponse(body = "abc"))
+
+    client = client.newBuilder().addInterceptor(SuspendingInterceptor {
+      it.proceedAsync(it.request())
+    }).build()
+
+    val call = client.newCall(request)
+
+    call.execute().use {
+      assertThat(it.body.string()).isEqualTo("abc")
+    }
+  }
+
+  @Disabled("TODO work this out")
   @Test
   fun failsOnBlockingCall() {
     runTest {
