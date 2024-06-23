@@ -2,10 +2,14 @@ package okhttp3
 
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
+import okhttp3.internal.connection.RealCall
+import okhttp3.internal.coroutines.callCoroutineContext
+import okhttp3.internal.coroutines.runBlocking
+import kotlin.coroutines.coroutineContext
 
 abstract class SuspendingInterceptor : Interceptor {
   final override fun intercept(chain: Interceptor.Chain): Response {
-    return runBlocking {
+    return chain.call().runBlocking {
       try {
         interceptAsync(AsyncChain(chain))
       } catch (ibce: InvalidBlockingCall) {
@@ -14,21 +18,16 @@ abstract class SuspendingInterceptor : Interceptor {
     }
   }
 
+  suspend fun Interceptor.Chain.proceedAsync(request: Request): Response {
+    // TODO unwrap
+    return this.proceed(request)
+  }
+
   abstract suspend fun interceptAsync(chain: Interceptor.Chain): Response
 
   companion object {
-    /**
-     * Constructs an interceptor for a lambda. This compact syntax is most useful for inline
-     * interceptors.
-     *
-     * ```kotlin
-     * val interceptor = SuspendingInterceptor { chain: Interceptor.Chain ->
-     *     chain.proceedAsync(chain.request())
-     * }
-     * ```
-     */
     inline operator fun invoke(
-      crossinline block: suspend (chain: Interceptor.Chain) -> Response
+      crossinline block: suspend SuspendingInterceptor.(Interceptor.Chain) -> Response
     ): SuspendingInterceptor = object : SuspendingInterceptor() {
       override suspend fun interceptAsync(chain: Interceptor.Chain): Response {
         return block(chain)
@@ -37,9 +36,12 @@ abstract class SuspendingInterceptor : Interceptor {
   }
 }
 
-private class AsyncChain(delegate: Interceptor.Chain): Interceptor.Chain by delegate {
+private class AsyncChain(val delegate: Interceptor.Chain): Interceptor.Chain by delegate {
   override fun proceed(request: Request): Response {
-    throw InvalidBlockingCall()
+    // TODO block here
+//    throw InvalidBlockingCall()
+
+    return delegate.proceed(request)
   }
 }
 

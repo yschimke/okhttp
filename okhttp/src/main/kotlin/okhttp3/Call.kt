@@ -15,6 +15,7 @@
  */
 package okhttp3
 
+import okhttp3.internal.coroutines.CallContext
 import okio.IOException
 import okio.Timeout
 

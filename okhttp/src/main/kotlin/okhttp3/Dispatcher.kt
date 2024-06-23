@@ -23,6 +23,8 @@ import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
+import kotlinx.coroutines.CoroutineDispatcher
+import okhttp3.internal.coroutines.OkHttpCoroutineDispatcher
 import okhttp3.internal.assertNotHeld
 import okhttp3.internal.connection.Locks.withLock
 import okhttp3.internal.connection.RealCall
@@ -39,6 +41,8 @@ import okhttp3.internal.threadFactory
  */
 class Dispatcher() {
   internal val lock: ReentrantLock = ReentrantLock()
+
+  internal val coroutineDispatcher: OkHttpCoroutineDispatcher = OkHttpCoroutineDispatcher(this)
 
   /**
    * The maximum number of requests to execute concurrently. Above this requests queue in memory,

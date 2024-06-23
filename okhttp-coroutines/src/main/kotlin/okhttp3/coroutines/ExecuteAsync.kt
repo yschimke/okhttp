@@ -20,35 +20,43 @@ package okhttp3.coroutines
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Response
 import okhttp3.internal.closeQuietly
+import okhttp3.internal.coroutines.callCoroutineContext
 import okio.IOException
 
 @ExperimentalCoroutinesApi // resume with a resource cleanup.
-suspend fun Call.executeAsync(): Response =
-  suspendCancellableCoroutine { continuation ->
-    continuation.invokeOnCancellation {
-      this.cancel()
-    }
-    this.enqueue(
-      object : Callback {
-        override fun onFailure(
-          call: Call,
-          e: IOException,
-        ) {
-          continuation.resumeWithException(e)
-        }
-
-        override fun onResponse(
-          call: Call,
-          response: Response,
-        ) {
-          continuation.resume(response) {
-            response.closeQuietly()
+suspend fun Call.executeAsync(): Response {
+  println("Before withContext " + Thread.currentThread())
+  return withContext(callCoroutineContext) {
+    println("in withContext " + Thread.currentThread())
+    suspendCancellableCoroutine { continuation ->
+      continuation.invokeOnCancellation {
+        this@executeAsync.cancel()
+      }
+      println("in suspendCancellableCoroutine " + Thread.currentThread())
+      this@executeAsync.enqueue(
+        object : Callback {
+          override fun onFailure(
+            call: Call,
+            e: IOException,
+          ) {
+            continuation.resumeWithException(e)
           }
-        }
-      },
-    )
+
+          override fun onResponse(
+            call: Call,
+            response: Response,
+          ) {
+            continuation.resume(response) { _, _, _ ->
+              response.closeQuietly()
+            }
+          }
+        },
+      )
+    }
   }
+}

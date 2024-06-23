@@ -80,10 +80,6 @@ fun interface Interceptor {
     @Throws(IOException::class)
     fun proceed(request: Request): Response
 
-    suspend fun proceedAsync(request: Request): Response {
-      return this.proceed(request)
-    }
-
     /**
      * Returns the connection the request will be executed on. This is only available in the chains
      * of network interceptors; for application interceptors this is always null.

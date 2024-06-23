@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.EventListener
@@ -39,6 +41,7 @@ import okhttp3.internal.assertThreadDoesntHoldLock
 import okhttp3.internal.cache.CacheInterceptor
 import okhttp3.internal.closeQuietly
 import okhttp3.internal.connection.Locks.withLock
+import okhttp3.internal.coroutines.CallContext
 import okhttp3.internal.http.BridgeInterceptor
 import okhttp3.internal.http.CallServerInterceptor
 import okhttp3.internal.http.RealInterceptorChain
@@ -68,6 +71,10 @@ class RealCall(
   private val connectionPool: RealConnectionPool = client.connectionPool.delegate
 
   internal val eventListener: EventListener = client.eventListenerFactory.create(this)
+
+  internal val callContext = CallContext(this)
+
+  internal val callScope: CoroutineScope = Job()
 
   private val timeout =
     object : AsyncTimeout() {
