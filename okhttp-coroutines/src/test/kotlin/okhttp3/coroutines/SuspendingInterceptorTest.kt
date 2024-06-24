@@ -256,10 +256,7 @@ class SuspendingInterceptorTest {
 
             client = client.newBuilder().addInterceptor(SuspendingInterceptor {
                 delay(100)
-                println(thread.name)
-                thread.stackTrace.forEach {
-                    println("\tat $it")
-                }
+                thread.printStackTrace()
                 it.proceedAsync(it.request())
             }).build()
 
@@ -271,5 +268,12 @@ class SuspendingInterceptorTest {
                 }
             }
         }
+    }
+}
+
+private fun Thread.printStackTrace() {
+    println(name)
+    stackTrace.forEach {
+        println("\tat $it")
     }
 }

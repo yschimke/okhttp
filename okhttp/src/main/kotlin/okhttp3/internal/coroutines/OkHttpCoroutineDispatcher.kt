@@ -13,6 +13,9 @@ class OkHttpCoroutineDispatcher(val dispatcher: Dispatcher): CoroutineDispatcher
   }
 
   fun <T> runBlocking(block: suspend CoroutineScope.() -> T): T {
-
+    // TODO work out how to use the current thread to help make progress
+    return kotlinx.coroutines.runBlocking(this) {
+      block()
+    }
   }
 }

@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
+import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import okhttp3.Call
@@ -74,7 +75,7 @@ class RealCall(
 
   internal val callContext = CallContext(this)
 
-  internal val callScope: CoroutineScope = Job()
+  internal val job: Job = Job()
 
   private val timeout =
     object : AsyncTimeout() {
@@ -122,8 +123,6 @@ class RealCall(
   // These properties are accessed by canceling threads. Any thread can cancel a call, and once it's
   // canceled it's canceled forever.
 
-  @Volatile private var canceled = false
-
   @Volatile private var exchange: Exchange? = null
   internal val plansToCancel = CopyOnWriteArrayList<RoutePlanner.Plan>()
 
@@ -144,9 +143,9 @@ class RealCall(
    * if a socket connection is being established, that is terminated.
    */
   override fun cancel() {
-    if (canceled) return // Already canceled.
+    if (job.isCancelled) return // Already canceled.
 
-    canceled = true
+    job.cancel()
     exchange?.cancel()
     for (plan in plansToCancel) {
       plan.cancel()
@@ -155,7 +154,7 @@ class RealCall(
     eventListener.canceled(this)
   }
 
-  override fun isCanceled(): Boolean = canceled
+  override fun isCanceled(): Boolean = job.isCancelled
 
   override fun execute(): Response {
     check(executed.compareAndSet(false, true)) { "Already Executed" }
@@ -294,7 +293,7 @@ class RealCall(
       this.responseBodyOpen = true
     }
 
-    if (canceled) throw IOException("Canceled")
+    if (job.isCancelled) throw IOException("Canceled")
     return result
   }
 
