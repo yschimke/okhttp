@@ -36,15 +36,15 @@ buildscript {
   }
 }
 
-apply(plugin = "org.jetbrains.dokka")
-apply(plugin = "com.diffplug.spotless")
-
-configure<SpotlessExtension> {
-  kotlin {
-    target("**/*.kt")
-    ktlint()
-  }
-}
+//apply(plugin = "org.jetbrains.dokka")
+//apply(plugin = "com.diffplug.spotless")
+//
+//configure<SpotlessExtension> {
+//  kotlin {
+//    target("**/*.kt")
+//    ktlint()
+//  }
+//}
 
 allprojects {
   group = "com.squareup.okhttp3"
@@ -66,13 +66,13 @@ allprojects {
     }
   }
 
-  normalization {
-    runtimeClasspath {
-      metaInf {
-        ignoreAttribute("Bnd-LastModified")
-      }
-    }
-  }
+//  normalization {
+//    runtimeClasspath {
+//      metaInf {
+//        ignoreAttribute("Bnd-LastModified")
+//      }
+//    }
+//  }
 }
 
 /** Configure building for Java+Kotlin projects. */
@@ -86,60 +86,62 @@ subprojects {
   if (project.name == "android-test-app") return@subprojects
   if (project.name == "container-tests") return@subprojects
 
-  apply(plugin = "checkstyle")
-  apply(plugin = "ru.vyarus.animalsniffer")
-  apply(plugin = "biz.aQute.bnd.builder")
-  apply(plugin = "io.github.usefulness.maven-sympathy")
+//  apply(plugin = "checkstyle")
+//  apply(plugin = "ru.vyarus.animalsniffer")
+//  apply(plugin = "biz.aQute.bnd.builder")
+//  apply(plugin = "io.github.usefulness.maven-sympathy")
 
   tasks.withType<JavaCompile> {
     options.encoding = Charsets.UTF_8.toString()
   }
 
-  configure<JavaPluginExtension> {
-    toolchain {
-      languageVersion.set(JavaLanguageVersion.of(17))
-    }
-  }
+//  configure<JavaPluginExtension> {
+//    toolchain {
+//      languageVersion.set(JavaLanguageVersion.of(17))
+//    }
+//  }
 
   tasks.withType<Checkstyle>().configureEach {
     exclude("**/CipherSuite.java")
   }
 
-  val checkstyleConfig: Configuration by configurations.creating
-  dependencies {
-    checkstyleConfig(rootProject.libs.checkStyle) {
-      isTransitive = false
-    }
-  }
+//  val checkstyleConfig: Configuration by configurations.creating
+//  dependencies {
+//    checkstyleConfig(rootProject.libs.checkStyle) {
+//      isTransitive = false
+//    }
+//  }
 
-  configure<CheckstyleExtension> {
-    config = resources.text.fromArchiveEntry(checkstyleConfig, "google_checks.xml")
-    toolVersion = rootProject.libs.versions.checkStyle.get()
-    sourceSets = listOf(project.sourceSets["main"])
-  }
+//    configure<CheckstyleExtension> {
+//      config = resources.text.fromArchiveEntry(checkstyleConfig, "google_checks.xml")
+//      toolVersion = rootProject.libs.versions.checkStyle.get()
+//      sourceSets = listOf(project.sourceSets["main"])
+//    }
+//
+//    // Animal Sniffer confirms we generally don't use APIs not on Java 8.
+//    configure<AnimalSnifferExtension> {
+//      annotation = "okhttp3.internal.SuppressSignatureCheck"
+//      sourceSets = listOf(project.sourceSets["main"])
+//    }
 
-  // Animal Sniffer confirms we generally don't use APIs not on Java 8.
-  configure<AnimalSnifferExtension> {
-    annotation = "okhttp3.internal.SuppressSignatureCheck"
-    sourceSets = listOf(project.sourceSets["main"])
-  }
+  println(project.name)
 
-  val signature: Configuration by configurations.getting
-  dependencies {
-    // No dependency requirements for testing-support.
-    if (project.name == "okhttp-testing-support") return@dependencies
-
-    if (project.name == "mockwebserver3-junit5") {
-      // JUnit 5's APIs need java.util.function.Function and java.util.Optional from API 24.
-      signature(rootProject.libs.signature.android.apilevel24) { artifact { type = "signature" } }
-    } else {
-      // Everything else requires Android API 21+.
-      signature(rootProject.libs.signature.android.apilevel21) { artifact { type = "signature" } }
-    }
-
-    // OkHttp requires Java 8+.
-    signature(rootProject.libs.codehaus.signature.java18) { artifact { type = "signature" } }
-  }
+//  val signature: Configuration by configurations.getting
+//  dependencies {
+//    // No dependency requirements for testing-support.
+//    if (project.name == "okhttp-testing-support") return@dependencies
+//
+//    if (project.name == "mockwebserver3-junit5") {
+//      // JUnit 5's APIs need java.util.function.Function and java.util.Optional from API 24.
+//      signature(rootProject.libs.signature.android.apilevel24) { artifact { type = "signature" } }
+//    } else {
+//      // Everything else requires Android API 21+.
+//      signature(rootProject.libs.signature.android.apilevel21) { artifact { type = "signature" } }
+//    }
+//
+//    // OkHttp requires Java 8+.
+//    signature(rootProject.libs.codehaus.signature.java18) { artifact { type = "signature" } }
+//  }
 
   tasks.withType<KotlinCompile> {
     kotlinOptions {
@@ -153,11 +155,11 @@ subprojects {
   val platform = System.getProperty("okhttp.platform", "jdk9")
   val testJavaVersion = System.getProperty("test.java.version", "21").toInt()
 
-  val testRuntimeOnly: Configuration by configurations.getting
-  dependencies {
-    testRuntimeOnly(rootProject.libs.junit.jupiter.engine)
-    testRuntimeOnly(rootProject.libs.junit.vintage.engine)
-  }
+//  val testRuntimeOnly: Configuration by configurations.getting
+//  dependencies {
+//    testRuntimeOnly(rootProject.libs.junit.jupiter.engine)
+//    testRuntimeOnly(rootProject.libs.junit.vintage.engine)
+//  }
 
   tasks.withType<Test> {
     useJUnitPlatform()
@@ -203,11 +205,11 @@ subprojects {
     }
   } else if (platform == "conscrypt") {
     dependencies {
-      testRuntimeOnly(rootProject.libs.conscrypt.openjdk)
+//      testRuntimeOnly(rootProject.libs.conscrypt.openjdk)
     }
   } else if (platform == "openjsse") {
     dependencies {
-      testRuntimeOnly(rootProject.libs.openjsse)
+//      testRuntimeOnly(rootProject.libs.openjsse)
     }
   }
 

@@ -27,7 +27,7 @@ import org.gradle.kotlin.dsl.getByName
 
 fun Project.applyOsgi(vararg bndProperties: String) {
   plugins.withId("org.jetbrains.kotlin.jvm") {
-    applyOsgi("jar", "osgiApi", bndProperties)
+//    applyOsgi("jar", "osgiApi", bndProperties)
   }
 }
 
@@ -36,31 +36,31 @@ private fun Project.applyOsgi(
   osgiApiConfigurationName: String,
   bndProperties: Array<out String>,
 ) {
-  val osgi = project.sourceSets.create("osgi")
-  val osgiApi = project.configurations.getByName(osgiApiConfigurationName)
-  val kotlinOsgi =
-    extensions.getByType(VersionCatalogsExtension::class.java).named("libs")
-      .findLibrary("kotlin.stdlib.osgi").get().get()
-
-  project.dependencies {
-    osgiApi(kotlinOsgi)
-  }
-
-  val jarTask = tasks.getByName<Jar>(jarTaskName)
-  val bundleExtension =
-    jarTask.extensions.findByType() ?: jarTask.extensions.create(
-      BundleTaskExtension.NAME,
-      BundleTaskExtension::class.java,
-      jarTask,
-    )
-  bundleExtension.run {
-    setClasspath(osgi.compileClasspath + sourceSets["main"].compileClasspath)
-    bnd(*bndProperties)
-  }
-  // Call the convention when the task has finished, to modify the jar to contain OSGi metadata.
-  jarTask.doLast {
-    bundleExtension.buildAction().execute(this)
-  }
+//  val osgi = project.sourceSets.create("osgi")
+//  val osgiApi = project.configurations.getByName(osgiApiConfigurationName)
+//  val kotlinOsgi =
+//    extensions.getByType(VersionCatalogsExtension::class.java).named("libs")
+//      .findLibrary("kotlin.stdlib.osgi").get().get()
+//
+//  project.dependencies {
+//    osgiApi(kotlinOsgi)
+//  }
+//
+//  val jarTask = tasks.getByName<Jar>(jarTaskName)
+//  val bundleExtension =
+//    jarTask.extensions.findByType() ?: jarTask.extensions.create(
+//      BundleTaskExtension.NAME,
+//      BundleTaskExtension::class.java,
+//      jarTask,
+//    )
+//  bundleExtension.run {
+//    setClasspath(osgi.compileClasspath + sourceSets["main"].compileClasspath)
+//    bnd(*bndProperties)
+//  }
+//  // Call the convention when the task has finished, to modify the jar to contain OSGi metadata.
+//  jarTask.doLast {
+//    bundleExtension.buildAction().execute(this)
+//  }
 }
 
 val Project.sourceSets: SourceSetContainer

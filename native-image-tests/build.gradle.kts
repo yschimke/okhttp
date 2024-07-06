@@ -35,9 +35,9 @@ dependencies {
   compileOnly(libs.findbugs.jsr305)
 }
 
-animalsniffer {
-  isIgnoreFailures = true
-}
+//animalsniffer {
+//  isIgnoreFailures = true
+//}
 
 sourceSets {
   main {

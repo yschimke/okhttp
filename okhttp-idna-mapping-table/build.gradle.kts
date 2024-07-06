@@ -11,6 +11,6 @@ dependencies {
   testImplementation(libs.junit.jupiter.params)
 }
 
-animalsniffer {
-  isIgnoreFailures = true
-}
+//animalsniffer {
+//  isIgnoreFailures = true
+//}

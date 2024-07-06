@@ -31,6 +31,6 @@ dependencies {
   testImplementation(libs.kotlin.test.junit)
 }
 
-animalsniffer {
-  isIgnoreFailures = true
-}
+//animalsniffer {
+//  isIgnoreFailures = true
+//}

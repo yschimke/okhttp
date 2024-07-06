@@ -21,7 +21,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Test
 
 /**
- * Run with "./gradlew :android-test-app:connectedCheck -PandroidBuild=true" and make sure ANDROID_SDK_ROOT is set.
+ * Run with "./gradlew :android-test-app:connectedReleaseAndroidTest -PandroidBuild=true" and make sure
+ * ANDROID_SDK_ROOT is set.
  */
 class PublicSuffixDatabaseTest {
   @Test

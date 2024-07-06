@@ -29,10 +29,10 @@ dependencies {
   testImplementation(libs.assertk)
 }
 
-animalsniffer {
-  // InsecureExtendedTrustManager (API 24+)
-  ignore = listOf("javax.net.ssl.X509ExtendedTrustManager")
-}
+//animalsniffer {
+//  // InsecureExtendedTrustManager (API 24+)
+//  ignore = listOf("javax.net.ssl.X509ExtendedTrustManager")
+//}
 
 mavenPublishing {
   configure(KotlinJvm(javadocJar = JavadocJar.Empty()))
