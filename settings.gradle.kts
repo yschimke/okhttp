@@ -2,7 +2,19 @@ import java.util.Properties
 
 rootProject.name = "okhttp-parent"
 
+pluginManagement {
+  repositories {
+    google()
+    gradlePluginPortal()
+    mavenCentral()
+  }
+
+  includeBuild("build-logic/conventions")
+  includeBuild("build-logic/settings")
+}
+
 plugins {
+  id("com.squareup.okhttp3.gradle-settings")
   id("org.gradle.toolchains.foojay-resolver-convention") version("0.8.0")
 }
 

@@ -5,16 +5,20 @@ com-squareup-moshi = "1.15.1"
 com-squareup-okio = "3.9.1"
 de-mannodermaus-junit5 = "1.5.0"
 graalvm = "22.3.2"
+jvm-toolchain = "17"
+jvm-target-library = "1.8"
+kotlinGradleExtensions = "0.1.12"
 kotlinx-serialization = "1.6.3"
 ksp = "1.9.24-1.0.20"
 mockserverClient = "5.15.0"
 org-bouncycastle = "1.76"
 org-conscrypt = "2.5.2"
 org-jetbrains-coroutines = "1.8.1"
-org-jetbrains-kotlin = "1.9.25"
+kotlin = "1.9.24"
 org-junit-jupiter = "5.11.0"
 retrofit = "2.11.0"
 testcontainers = "1.20.1"
+spotless = "6.25.0"
 
 [libraries]
 amazonCorretto = "software.amazon.cryptools:AmazonCorrettoCryptoProvider:2.4.1"
@@ -46,8 +50,8 @@ gradlePlugin-bnd = { module = "biz.aQute.bnd:biz.aQute.bnd.gradle", version.ref 
 gradlePlugin-dokka = "org.jetbrains.dokka:dokka-gradle-plugin:1.9.20"
 gradlePlugin-errorprone = "net.ltgt.gradle:gradle-errorprone-plugin:4.0.1"
 gradlePlugin-graal = "com.palantir.graal:gradle-graal:0.12.0"
-gradlePlugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "org-jetbrains-kotlin" }
-gradlePlugin-kotlinSerialization = { module = "org.jetbrains.kotlin:kotlin-serialization", version.ref = "org-jetbrains-kotlin" }
+gradlePlugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+gradlePlugin-kotlinSerialization = { module = "org.jetbrains.kotlin:kotlin-serialization", version.ref = "kotlin" }
 gradlePlugin-mavenPublish = "com.vanniktech:gradle-maven-publish-plugin:0.29.0"
 gradlePlugin-mavenSympathy = "io.github.usefulness.maven-sympathy:io.github.usefulness.maven-sympathy.gradle.plugin:0.3.0"
 gradlePlugin-shadow = "gradle.plugin.com.github.johnrengelman:shadow:8.0.0"
@@ -68,14 +72,15 @@ junit-vintage-engine = "org.junit.vintage:junit-vintage-engine:5.11.0"
 junit-pioneer = "org.junit-pioneer:junit-pioneer:1.9.1"
 junit5android-core = { module = "de.mannodermaus.junit5:android-test-core", version.ref = "de-mannodermaus-junit5" }
 junit5android-runner = { module = "de.mannodermaus.junit5:android-test-runner", version.ref = "de-mannodermaus-junit5" }
-kotlin-junit5 = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "org-jetbrains-kotlin" }
-kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "org-jetbrains-kotlin" }
-kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "org-jetbrains-kotlin" }
-kotlin-stdlib-osgi = { module = "org.jetbrains.kotlin:kotlin-osgi-bundle", version.ref = "org-jetbrains-kotlin" }
-kotlin-test-annotations = { module = "org.jetbrains.kotlin:kotlin-test-annotations-common", version.ref = "org-jetbrains-kotlin" }
-kotlin-test-common = { module = "org.jetbrains.kotlin:kotlin-test-common", version.ref = "org-jetbrains-kotlin" }
-kotlin-test-js = { module = "org.jetbrains.kotlin:kotlin-test-js", version.ref = "org-jetbrains-kotlin" }
-kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "org-jetbrains-kotlin" }
+kotlin-gradle-extensions = { module = "com.rickbusarow.kgx:kotlin-gradle-extensions", version.ref = "kotlinGradleExtensions" }
+kotlin-junit5 = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlin" }
+kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+kotlin-stdlib-osgi = { module = "org.jetbrains.kotlin:kotlin-osgi-bundle", version.ref = "kotlin" }
+kotlin-test-annotations = { module = "org.jetbrains.kotlin:kotlin-test-annotations-common", version.ref = "kotlin" }
+kotlin-test-common = { module = "org.jetbrains.kotlin:kotlin-test-common", version.ref = "kotlin" }
+kotlin-test-js = { module = "org.jetbrains.kotlin:kotlin-test-js", version.ref = "kotlin" }
+kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "org-jetbrains-coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "org-jetbrains-coroutines" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
@@ -100,3 +105,7 @@ squareup-okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem
 squareup-okio-nodefilesystem = { module = "com.squareup.okio:okio-nodefilesystem", version.ref = "com-squareup-okio" }
 testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
 testcontainers-junit5 = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
