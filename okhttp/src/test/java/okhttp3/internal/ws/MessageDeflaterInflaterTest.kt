@@ -18,6 +18,7 @@ package okhttp3.internal.ws
 import assertk.assertThat
 import assertk.assertions.isEqualTo
 import assertk.assertions.isLessThan
+import assertk.assertions.isNotNull
 import java.io.EOFException
 import kotlin.test.assertFailsWith
 import okhttp3.TestUtil.fragmentBuffer
@@ -25,6 +26,8 @@ import okio.Buffer
 import okio.ByteString
 import okio.ByteString.Companion.decodeHex
 import okio.ByteString.Companion.encodeUtf8
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import org.junit.jupiter.api.Test
 
 internal class MessageDeflaterInflaterTest {
@@ -42,6 +45,21 @@ internal class MessageDeflaterInflaterTest {
     val inflater = MessageInflater(false)
     val message = "53621260020000".decodeHex()
     assertThat(inflater.inflate(message)).isEqualTo("22021002".decodeHex())
+  }
+
+  /**
+   * Illegal argument exception: failed requirements after bytes left over.
+   *
+   * https://github.com/square/okhttp/issues/8551
+   */
+  @Test fun `illegal argument exception after bad packet`() {
+    val inflater = MessageInflater(true)
+
+    val message = FileSystem.RESOURCES.read("issue8551.txt".toPath()) {
+      readByteString()
+    }
+    println(message)
+    assertThat(inflater.inflate(message)).isNotNull()
   }
 
   @Test fun `deflate golden value`() {
