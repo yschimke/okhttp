@@ -2,7 +2,6 @@
 
 plugins {
   id("com.android.application")
-  id("kotlin-android")
 }
 
 android {
@@ -23,16 +22,16 @@ android {
     sourceCompatibility(JavaVersion.VERSION_11)
   }
 
-  kotlinOptions {
-    jvmTarget = JavaVersion.VERSION_11.toString()
-  }
+//  kotlinOptions {
+//    jvmTarget = JavaVersion.VERSION_11.toString()
+//  }
 
   buildTypes {
     release {
       isShrinkResources = true
       isMinifyEnabled = true
       signingConfig = signingConfigs.getByName("debug")
-      setProguardFiles(listOf(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"))
+      setProguardFiles(listOf(getDefaultProguardFile("proguard-android-optimize.txt")))
       testProguardFiles("test-proguard-rules.pro")
     }
   }

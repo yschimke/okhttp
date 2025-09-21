@@ -1,9 +1,7 @@
 @file:Suppress("UnstableApiUsage")
 
 plugins {
-  id("com.android.library")
-  kotlin("android")
-  id("de.mannodermaus.android-junit5")
+  id("com.android.application")
 }
 
 val androidBuild = property("androidBuild").toString().toBoolean()
@@ -40,13 +38,12 @@ android {
   }
 
   testOptions {
-    targetSdk = 34
     unitTests.isIncludeAndroidResources = true
   }
 
-  kotlinOptions {
-    jvmTarget = JavaVersion.VERSION_11.toString()
-  }
+//  kotlinOptions {
+//    jvmTarget = JavaVersion.VERSION_11.toString()
+//  }
 
   // issue merging due to conflict with httpclient and something else
   packagingOptions.resources.excludes += setOf(

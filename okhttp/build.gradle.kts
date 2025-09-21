@@ -10,7 +10,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   kotlin("multiplatform")
-  id("com.android.library")
+  id("com.android.kotlin.multiplatform.library")
   kotlin("plugin.serialization")
   id("org.jetbrains.dokka")
   id("com.vanniktech.maven.publish.base")
@@ -54,10 +54,40 @@ kotlin {
   jvm {
   }
 
-  androidTarget {
-    compilerOptions {
-      jvmTarget.set(JvmTarget.JVM_17)
-    }
+  androidLibrary {
+      namespace = "okhttp.okhttp3"
+      compileSdk = 35
+        minSdk = 21
+
+//    withJava()
+//    withHostTestBuilder {}.configure {}
+//    withDeviceTestBuilder {
+//    }
+
+//    android {
+//      compileSdk = 35
+//
+//      namespace = "okhttp.okhttp3"
+//
+//      defaultConfig {
+//        minSdk = 21
+//
+//        consumerProguardFiles("okhttp3.pro")
+//      }
+//
+//      testOptions {
+//        unitTests {
+//          isIncludeAndroidResources = true
+//        }
+//      }
+//
+//      sourceSets {
+//        named("main") {
+//          manifest.srcFile("src/androidMain/AndroidManifest.xml")
+//          assets.srcDir("src/androidMain/assets")
+//        }
+//      }
+//    }
   }
 
   sourceSets {
@@ -77,7 +107,7 @@ kotlin {
 
     commonTest {
       dependencies {
-        implementation(projects.okhttpTestingSupport)
+//        implementation(projects.okhttpTestingSupport)
         implementation(libs.assertk)
         implementation(libs.kotlin.test.annotations)
         implementation(libs.kotlin.test.common)
@@ -116,25 +146,25 @@ kotlin {
 
     val jvmTest by getting {
       dependencies {
-        implementation(projects.okhttpTestingSupport)
+//        implementation(projects.okhttpTestingSupport)
         implementation(libs.assertk)
         implementation(libs.kotlin.test.annotations)
         implementation(libs.kotlin.test.common)
         implementation(libs.kotlinx.serialization.core)
         implementation(libs.kotlinx.serialization.json)
-        implementation(projects.okhttpJavaNetCookiejar)
-        implementation(projects.okhttpTls)
-        implementation(projects.okhttpUrlconnection)
-        implementation(projects.mockwebserver3)
-        implementation(projects.mockwebserver3Junit4)
-        implementation(projects.mockwebserver3Junit5)
-        implementation(projects.mockwebserver)
-        implementation(projects.loggingInterceptor)
-        implementation(projects.okhttpBrotli)
-        implementation(projects.okhttpDnsoverhttps)
-        implementation(projects.okhttpIdnaMappingTable)
-        implementation(projects.okhttpSse)
-        implementation(projects.okhttpCoroutines)
+//        implementation(projects.okhttpJavaNetCookiejar)
+//        implementation(projects.okhttpTls)
+//        implementation(projects.okhttpUrlconnection)
+//        implementation(projects.mockwebserver3)
+//        implementation(projects.mockwebserver3Junit4)
+//        implementation(projects.mockwebserver3Junit5)
+//        implementation(projects.mockwebserver)
+//        implementation(projects.loggingInterceptor)
+//        implementation(projects.okhttpBrotli)
+//        implementation(projects.okhttpDnsoverhttps)
+//        implementation(projects.okhttpIdnaMappingTable)
+//        implementation(projects.okhttpSse)
+//        implementation(projects.okhttpCoroutines)
         implementation(libs.kotlinx.coroutines.core)
         implementation(libs.squareup.moshi)
         implementation(libs.squareup.moshi.kotlin)
@@ -157,19 +187,19 @@ kotlin {
       }
     }
 
-    val androidUnitTest by getting {
-      dependencies {
-        implementation(libs.assertk)
-        implementation(libs.kotlin.test.annotations)
-        implementation(libs.kotlin.test.common)
-        implementation(libs.androidx.junit)
-
-        implementation(libs.junit.jupiter.engine)
-        implementation(libs.junit.vintage.engine)
-
-        implementation(libs.robolectric)
-      }
-    }
+//    val androidUnitTest by getting {
+//      dependencies {
+//        implementation(libs.assertk)
+//        implementation(libs.kotlin.test.annotations)
+//        implementation(libs.kotlin.test.common)
+//        implementation(libs.androidx.junit)
+//
+//        implementation(libs.junit.jupiter.engine)
+//        implementation(libs.junit.vintage.engine)
+//
+//        implementation(libs.robolectric)
+//      }
+//    }
   }
 }
 
@@ -186,30 +216,30 @@ if (platform == "jdk8alpn") {
   }
 }
 
-android {
-  compileSdk = 35
-
-  namespace = "okhttp.okhttp3"
-
-  defaultConfig {
-    minSdk = 21
-
-    consumerProguardFiles("okhttp3.pro")
-  }
-
-  testOptions {
-    unitTests {
-      isIncludeAndroidResources = true
-    }
-  }
-
-  sourceSets {
-    named("main") {
-      manifest.srcFile("src/androidMain/AndroidManifest.xml")
-      assets.srcDir("src/androidMain/assets")
-    }
-  }
-}
+//android {
+//  compileSdk = 35
+//
+//  namespace = "okhttp.okhttp3"
+//
+//  defaultConfig {
+//    minSdk = 21
+//
+//    consumerProguardFiles("okhttp3.pro")
+//  }
+//
+//  testOptions {
+//    unitTests {
+//      isIncludeAndroidResources = true
+//    }
+//  }
+//
+//  sourceSets {
+//    named("main") {
+//      manifest.srcFile("src/androidMain/AndroidManifest.xml")
+//      assets.srcDir("src/androidMain/assets")
+//    }
+//  }
+//}
 
 // From https://github.com/Kotlin/kotlinx-atomicfu/blob/master/atomicfu/build.gradle.kts
 val compileJavaModuleInfo by tasks.registering(JavaCompile::class) {
