@@ -9,12 +9,10 @@ import ru.vyarus.gradle.plugin.animalsniffer.AnimalSnifferExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
+  id("okhttp.project-conventions")
   kotlin("multiplatform")
   id("com.android.library")
   kotlin("plugin.serialization")
-  id("org.jetbrains.dokka")
-  id("com.vanniktech.maven.publish.base")
-  id("binary-compatibility-validator")
   id("app.cash.burst")
 }
 
@@ -314,10 +312,6 @@ dependencies {
 
   // OkHttp requires Java 8+.
   jvmSignature(rootProject.libs.codehaus.signature.java18) { artifact { type = "signature" } }
-
-  checkstyleConfig(rootProject.libs.checkStyle) {
-    isTransitive = false
-  }
 }
 
 // Animal Sniffer confirms we generally don't use APIs not on Java 8.
@@ -365,8 +359,6 @@ tasks.withType<KotlinCompile> {
     freeCompilerArgs = listOf("-module-name=okhttp")
   }
 }
-
-apply(plugin = "io.github.usefulness.maven-sympathy")
 
 mavenPublishing {
   configure(KotlinMultiplatform(javadocJar = JavadocJar.Empty(), androidVariantsToPublish = listOf("release")))

@@ -6,6 +6,8 @@ plugins {
   id("org.gradle.toolchains.foojay-resolver-convention") version("1.0.0")
 }
 
+includeBuild("build-logic")
+
 include(":mockwebserver")
 project(":mockwebserver").name = "mockwebserver3"
 include(":mockwebserver-deprecated")

@@ -4,9 +4,6 @@ import org.jetbrains.kotlin.gradle.dsl.kotlinExtension
 
 plugins {
   kotlin("jvm")
-  id("org.jetbrains.dokka")
-  id("com.vanniktech.maven.publish.base")
-  id("binary-compatibility-validator")
 }
 
 project.applyJavaModules("mockwebserver3")
