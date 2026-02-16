@@ -136,6 +136,7 @@ class ConnectPlan internal constructor(
       success = true
       return ConnectResult(plan = this)
     } catch (e: IOException) {
+      e.printStackTrace()
       // If we used the ProxySelector, and got a IOException during connect, report the failure.
       if (route.address.proxy == null && route.proxy.type() != Proxy.Type.DIRECT) {
         route.address.proxySelector.connectFailed(

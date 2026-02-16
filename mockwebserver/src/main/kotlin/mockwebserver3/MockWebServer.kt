@@ -379,7 +379,7 @@ public class MockWebServer : Closeable {
       try {
         socket = serverSocket!!.accept()
       } catch (e: SocketException) {
-        logger.fine("${this@MockWebServer} done accepting connections: ${e.message}")
+        println("${this@MockWebServer} done accepting connections: ${e.message}")
         return
       }
 
@@ -392,6 +392,7 @@ public class MockWebServer : Closeable {
         )
         socket.close()
       } else {
+        println("open socket from client")
         openClientSockets.add(socket)
         serveConnection(nextConnectionIndex++, socket, peek)
       }
@@ -423,12 +424,14 @@ public class MockWebServer : Closeable {
     firstExchangePeek: MockResponse,
   ) {
     taskRunner.newQueue().execute("MockWebServer ${raw.remoteSocketAddress}", cancelable = false) {
+      println("serve connection from client")
       try {
         SocketHandler(connectionIndex, raw, firstExchangePeek).handle()
+        println("Finished")
       } catch (e: IOException) {
-        logger.fine("$this connection from ${raw.inetAddress} failed: $e")
+        println("$this connection from ${raw.inetAddress} failed: $e")
       } catch (e: Exception) {
-        logger.log(Level.SEVERE, "$this connection from ${raw.inetAddress} crashed", e)
+        println("$this connection from ${raw.inetAddress} crashed")//, e)
       }
     }
   }

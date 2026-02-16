@@ -32,7 +32,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
-import mockwebserver3.junit5.StartStop
+import mockwebserver3.socket.AutoClock
+import mockwebserver3.socket.MockServerSocket
+import mockwebserver3.socket.MockSocketFactory
+import mockwebserver3.socket.NetworkProfile
+import mockwebserver3.socket.SocketMode
+import mockwebserver3.socket.asServerSocketFactory
 import okhttp3.Cache
 import okhttp3.CallEvent
 import okhttp3.CallEvent.CacheHit
@@ -53,27 +58,44 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 
 @Tag("Slowish")
-class DnsOverHttpsTest {
+@app.cash.burst.Burst
+class DnsOverHttpsTest(
+  private val socketMode: SocketMode = SocketMode.MOCK,
+) {
   @RegisterExtension
   val platform = PlatformRule()
 
-  @StartStop
   private val server = MockWebServer()
 
   private lateinit var dns: Dns
   private val cacheFs = FakeFileSystem()
   private val eventRecorder = EventRecorder()
-  private val bootstrapClient =
-    OkHttpClient
-      .Builder()
-      .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-      .eventListener(eventRecorder.eventListener)
-      .build()
+  private lateinit var bootstrapClient: OkHttpClient
 
   @BeforeEach
   fun setUp() {
+    val clientBuilder =
+      OkHttpClient.Builder()
+        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+        .eventListener(eventRecorder.eventListener)
+
+    if (socketMode == SocketMode.MOCK) {
+      val mockServerSocket = MockServerSocket(AutoClock(), NetworkProfile.SLOW_MOBILE)
+      server.serverSocketFactory = mockServerSocket.asServerSocketFactory()
+
+      clientBuilder.socketFactory(MockSocketFactory(mockServerSocket))
+    }
+
+    bootstrapClient = clientBuilder.build()
+
+    server.start()
     server.protocols = bootstrapClient.protocols
     dns = buildLocalhost(bootstrapClient, false)
+  }
+
+  @org.junit.jupiter.api.AfterEach
+  fun tearDown() {
+    server.close()
   }
 
   @Test
@@ -191,7 +213,8 @@ class DnsOverHttpsTest {
           "0000818000010003000000000567726170680866616365626f6f6b03636f6d0000010001c00c000500010" +
             "0000a6d000603617069c012c0300005000100000cde000c04737461720463313072c012c04200010001000" +
             "0003b00049df00112",
-        ).newBuilder()
+        )
+          .newBuilder()
           .setHeader("cache-control", "private, max-age=298")
           .build(),
       )
@@ -233,7 +256,8 @@ class DnsOverHttpsTest {
           "0000818000010003000000000567726170680866616365626f6f6b03636f6d0000010001c00c000500010" +
             "0000a6d000603617069c012c0300005000100000cde000c04737461720463313072c012c04200010001000" +
             "0003b00049df00112",
-        ).newBuilder()
+        )
+          .newBuilder()
           .setHeader("cache-control", "private, max-age=298")
           .build(),
       )
@@ -243,8 +267,7 @@ class DnsOverHttpsTest {
     assertThat(result).containsExactly(address("157.240.1.18"))
     var recordedRequest = server.takeRequest()
     assertThat(recordedRequest.method).isEqualTo("POST")
-    assertThat(recordedRequest.url.encodedQuery)
-      .isEqualTo("ct")
+    assertThat(recordedRequest.url.encodedQuery).isEqualTo("ct")
 
     assertThat(cacheEvents()).containsExactly(CacheMiss::class)
 
@@ -258,8 +281,7 @@ class DnsOverHttpsTest {
     assertThat(result).containsExactly(address("157.240.1.18"))
     recordedRequest = server.takeRequest(0, TimeUnit.MILLISECONDS)!!
     assertThat(recordedRequest.method).isEqualTo("POST")
-    assertThat(recordedRequest.url.encodedQuery)
-      .isEqualTo("ct")
+    assertThat(recordedRequest.url.encodedQuery).isEqualTo("ct")
 
     assertThat(cacheEvents()).containsExactly(CacheMiss::class)
   }
@@ -274,7 +296,8 @@ class DnsOverHttpsTest {
         "0000818000010003000000000567726170680866616365626f6f6b03636f6d0000010001c00c000500010" +
           "0000a6d000603617069c012c0300005000100000cde000c04737461720463313072c012c04200010001000" +
           "0003b00049df00112",
-      ).newBuilder()
+      )
+        .newBuilder()
         .setHeader("cache-control", "max-age=1")
         .build(),
     )
@@ -282,9 +305,10 @@ class DnsOverHttpsTest {
     assertThat(result).containsExactly(address("157.240.1.18"))
     var recordedRequest = server.takeRequest(0, TimeUnit.SECONDS)
     assertThat(recordedRequest!!.method).isEqualTo("GET")
-    assertThat(recordedRequest.url.encodedQuery).isEqualTo(
-      "ct&dns=AAABAAABAAAAAAAABmdvb2dsZQNjb20AAAEAAQ",
-    )
+    assertThat(recordedRequest.url.encodedQuery)
+      .isEqualTo(
+        "ct&dns=AAABAAABAAAAAAAABmdvb2dsZQNjb20AAAEAAQ",
+      )
 
     assertThat(cacheEvents()).containsExactly(CacheMiss::class)
 
@@ -294,7 +318,8 @@ class DnsOverHttpsTest {
         "0000818000010003000000000567726170680866616365626f6f6b03636f6d0000010001c00c000500010" +
           "0000a6d000603617069c012c0300005000100000cde000c04737461720463313072c012c04200010001000" +
           "0003b00049df00112",
-      ).newBuilder()
+      )
+        .newBuilder()
         .setHeader("cache-control", "max-age=1")
         .build(),
     )
@@ -309,14 +334,12 @@ class DnsOverHttpsTest {
   }
 
   private fun cacheEvents(): List<KClass<out CallEvent>> =
-    eventRecorder
-      .recordedEventTypes()
-      .filter { "Cache" in it.simpleName!! }
-      .also { eventRecorder.clearAllEvents() }
+    eventRecorder.recordedEventTypes().filter { "Cache" in it.simpleName!! }.also {
+      eventRecorder.clearAllEvents()
+    }
 
   private fun dnsResponse(s: String): MockResponse =
-    MockResponse
-      .Builder()
+    MockResponse.Builder()
       .body(Buffer().write(s.decodeHex()))
       .addHeader("content-type", "application/dns-message")
       .addHeader("content-length", s.length / 2)
@@ -328,8 +351,7 @@ class DnsOverHttpsTest {
     post: Boolean = false,
   ): DnsOverHttps {
     val url = server.url("/lookup?ct")
-    return DnsOverHttps
-      .Builder()
+    return DnsOverHttps.Builder()
       .client(bootstrapClient)
       .includeIPv6(includeIPv6)
       .resolvePrivateAddresses(true)

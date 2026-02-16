@@ -4,6 +4,7 @@ plugins {
   id("okhttp.jvm-conventions")
   id("okhttp.quality-conventions")
   id("okhttp.testing-conventions")
+  alias(libs.plugins.burst)
 }
 
 project.applyOsgi(
