@@ -25,7 +25,6 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.Random
 import java.util.concurrent.TimeUnit
-import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -39,7 +38,7 @@ import org.junit.jupiter.api.Timeout
 public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISABLED) {
     @Test
     public fun pairCommunication() {
-        val (client, server) = MockSocket.pair()
+        val (client, server) = MockSocket.pair().apply { connect() }
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -52,15 +51,11 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
 
     @Test
     public fun readTimeout() {
-        val clock = FakeClock()
-        val (client, server) = MockSocket.pair(clock)
+        val clock = AutoClock()
+        val (client, server) = MockSocket.pair(clock).apply { connect() }
         client.recordMode = recordMode
 
         client.source.timeout().timeout(100, TimeUnit.MILLISECONDS)
-
-        // Concurrent advancement is necessary to unblock the main thread's read()
-        // since FakeClock doesn't advance by itself while blocked in Condition.await().
-        thread { clock.advanceBy(100, TimeUnit.MILLISECONDS) }
 
         assertFailure { client.source.buffer().readUtf8() }
                 .isInstanceOf(InterruptedIOException::class.java)
@@ -68,7 +63,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
 
     @Test
     public fun faultInjectionRead() {
-        val (client, server) = MockSocket.pair()
+        val (client, server) = MockSocket.pair().apply { connect() }
         client.recordMode = recordMode
 
         client.faults =
@@ -86,9 +81,13 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
         val clock = FakeClock()
         val (client, server) =
                 MockSocket.pair(
-                        clock = clock,
-                        profile = NetworkProfile(latencyNanos = TimeUnit.MILLISECONDS.toNanos(100))
-                )
+                                clock = clock,
+                                profile =
+                                        NetworkProfile(
+                                                latencyNanos = TimeUnit.MILLISECONDS.toNanos(100)
+                                        )
+                        )
+                        .apply { connect() }
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -113,9 +112,10 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
         val clock = FakeClock()
         val (client, server) =
                 MockSocket.pair(
-                        clock = clock,
-                        profile = NetworkProfile(bytesPerSecond = 1000) // 1 KB/s
-                )
+                                clock = clock,
+                                profile = NetworkProfile(bytesPerSecond = 1000) // 1 KB/s
+                        )
+                        .apply { connect() }
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -159,7 +159,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
         // Use a profile with latency to force the clock to advance.
         val latencyNanos = TimeUnit.MILLISECONDS.toNanos(10)
         val profile = NetworkProfile(latencyNanos = latencyNanos)
-        val (client, server) = MockSocket.pair(clock, profile)
+        val (client, server) = MockSocket.pair(clock, profile).apply { connect() }
         client.name = "Client"
         server.name = "Server"
         client.recordMode = recordMode
@@ -209,13 +209,13 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
                 lastTimestamp = event.timestampNanos
             }
             // And last timestamp should match clock
-             assertThat(lastTimestamp).isGreaterThanOrEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
+            assertThat(lastTimestamp).isGreaterThanOrEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
         }
     }
 
     @Test
     public fun shutdownOutput() {
-        val (client, server) = MockSocket.pair()
+        val (client, server) = MockSocket.pair().apply { connect() }
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -227,7 +227,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
 
     @Test
     public fun shutdownInput() {
-        val (client, server) = MockSocket.pair()
+        val (client, server) = MockSocket.pair().apply { connect() }
         client.recordMode = recordMode
 
         client.shutdownInput()
@@ -238,7 +238,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     @Test
     public fun autoClock() {
         val clock = AutoClock()
-        val (client, server) = MockSocket.pair(clock)
+        val (client, server) = MockSocket.pair(clock).apply { connect() }
         client.recordMode = recordMode
         server.recordMode = recordMode
 

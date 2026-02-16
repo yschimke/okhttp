@@ -20,10 +20,7 @@ import java.nio.channels.SocketChannel
 import okio.IOException
 import okio.buffer
 
-internal class MockSocketAdapter(
-  private val mockSocket: MockSocket,
-  private val onConnect: () -> Unit = {}
-) : JavaNetSocket() {
+internal class MockSocketAdapter(private val mockSocket: MockSocket) : JavaNetSocket() {
   override fun getInputStream() = mockSocket.source.buffer().inputStream()
   override fun getOutputStream() = mockSocket.sink.buffer().outputStream()
   override fun getInetAddress() = mockSocket.remoteAddress
@@ -50,7 +47,6 @@ internal class MockSocketAdapter(
     }
 
     mockSocket.connect(endpoint)
-    onConnect()
   }
 
   override fun connect(endpoint: java.net.SocketAddress, timeout: Int) {
@@ -59,7 +55,6 @@ internal class MockSocketAdapter(
     }
 
     mockSocket.connect(endpoint, timeout)
-    onConnect()
   }
 
   override fun bind(bindpoint: java.net.SocketAddress) {

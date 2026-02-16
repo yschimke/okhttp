@@ -56,23 +56,34 @@ public open class FakeClock : Clock {
     }
 
     override fun await(condition: Condition, timeoutNanos: Long) {
-        val start = System.nanoTime()
-        val limit =
+        val startNanoTime = lock.withLock { nanoTime }
+        val startRealTime = System.nanoTime()
+        val realLimit =
                 TimeUnit.SECONDS.toNanos(1) // 1 second real-world timeout for deadlock detection
+        var loopCount = 0
         while (true) {
-            val elapsed = System.nanoTime() - start
-            if (elapsed >= limit) {
+            loopCount++
+            if (loopCount % 1000 == 0) {
+                println("FakeClock loop count: $loopCount")
+            }
+            val nowRealTime = System.nanoTime()
+            if (nowRealTime - startRealTime >= realLimit) {
                 throw IOException(
-                        "Real-world timeout of 1s reached! Possible deadlock in FakeClock usage."
+                        "Real-world timeout of 1s reached! Possible deadlock in FakeClock usage. " +
+                                "(looped $loopCount times)"
                 )
+            }
+
+            // Check if simulated time has already passed the required duration
+            val nowNanoTime = lock.withLock { nanoTime }
+            if (nowNanoTime - startNanoTime >= timeoutNanos) {
+                return
             }
 
             // Wait for 10ms to see if the condition is signaled
             if (condition.await(10, TimeUnit.MILLISECONDS)) {
                 return // Signaled!
             }
-
-            return
         }
     }
 

@@ -26,8 +26,9 @@ import javax.net.SocketFactory
 import kotlin.concurrent.withLock
 
 public class MockServerSocket(
-  public val clock: Clock = Clock.SYSTEM,
-  public val profile: NetworkProfile = NetworkProfile()
+        public val clock: Clock = Clock.SYSTEM,
+        public val profile: NetworkProfile = NetworkProfile(),
+        public val sharedEvents: MutableList<SocketEvent> = mutableListOf()
 ) : ServerSocket() {
   private val lock = ReentrantLock()
   private val condition = lock.newCondition()
@@ -38,14 +39,29 @@ public class MockServerSocket(
   public var backlog: Int = 0
 
   override fun accept(): JavaNetSocket {
-    println("accept")
     lock.withLock {
+      recordEvent(
+              SocketEvent.AcceptStarting(clock.nanoTime(), Thread.currentThread().name, toString())
+      )
       while (queue.isEmpty()) {
         if (closed) throw IOException("closed")
-        condition.await()
+        clock.await(condition, Long.MAX_VALUE)
       }
-      return queue.removeAt(0).asSocket()
+      val socket = queue.removeAt(0)
+      recordEvent(
+              SocketEvent.AcceptReturning(
+                      clock.nanoTime(),
+                      Thread.currentThread().name,
+                      toString(),
+                      socket.name
+              )
+      )
+      return socket.asSocket()
     }
+  }
+
+  private fun recordEvent(event: SocketEvent) {
+    lock.withLock { sharedEvents.add(event) }
   }
 
   override fun close() {
@@ -75,7 +91,7 @@ public class MockServerSocket(
   override fun getLocalPort(): Int = if (localPort == 0) 80 else localPort
   override fun getInetAddress(): InetAddress = InetAddress.getLoopbackAddress()
   override fun getLocalSocketAddress(): java.net.SocketAddress =
-    InetSocketAddress(inetAddress, localPort)
+          InetSocketAddress(inetAddress, localPort)
 
   override fun toString(): String = "MockServerSocket[port=$localPort]"
 
@@ -92,79 +108,110 @@ public class MockServerSocket(
 }
 
 public fun MockServerSocket.asServerSocketFactory(): ServerSocketFactory =
-  object : ServerSocketFactory() {
-    override fun createServerSocket() = this@asServerSocketFactory
-    override fun createServerSocket(port: Int): ServerSocket = this@asServerSocketFactory.apply {
-      bind(
-        InetSocketAddress(port)
-      )
-    }
+        object : ServerSocketFactory() {
+          override fun createServerSocket() = this@asServerSocketFactory
+          override fun createServerSocket(port: Int): ServerSocket =
+                  this@asServerSocketFactory.apply { bind(InetSocketAddress(port)) }
 
-    override fun createServerSocket(port: Int, backlog: Int): ServerSocket =
-      this@asServerSocketFactory.apply {
-        this.backlog = backlog
-        bind(InetSocketAddress(port))
-      }
+          override fun createServerSocket(port: Int, backlog: Int): ServerSocket =
+                  this@asServerSocketFactory.apply {
+                    this.backlog = backlog
+                    bind(InetSocketAddress(port))
+                  }
 
-    override fun createServerSocket(
-      port: Int,
-      backlog: Int,
-      ifAddress: InetAddress?
-    ): ServerSocket = this@asServerSocketFactory.apply {
-      this.backlog = backlog
-      bind(if (ifAddress != null) InetSocketAddress(ifAddress, port) else InetSocketAddress(port))
-    }
-  }
+          override fun createServerSocket(
+                  port: Int,
+                  backlog: Int,
+                  ifAddress: InetAddress?
+          ): ServerSocket =
+                  this@asServerSocketFactory.apply {
+                    this.backlog = backlog
+                    bind(
+                            if (ifAddress != null) InetSocketAddress(ifAddress, port)
+                            else InetSocketAddress(port)
+                    )
+                  }
+        }
 
 public class MockSocketFactory(
-  private val server: MockServerSocket,
-  private val clock: Clock = server.clock,
-  private val profile: NetworkProfile = server.profile
+        private val server: MockServerSocket,
+        private val clock: Clock = server.clock,
+        private val profile: NetworkProfile = server.profile
 ) : SocketFactory() {
   override fun createSocket(): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile)
-    return MockSocketAdapter(client, onConnect = {
+    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)
-    })
+    }
+    return MockSocketAdapter(client)
   }
 
   override fun createSocket(host: String?, port: Int): JavaNetSocket {
-    println("${Thread.currentThread()} createSocket($host,$port")
-    val (client, server) = MockSocket.pair(clock, profile)
-    this.server.enqueue(server)
-    return MockSocketAdapter(client)
+    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    client.onConnect = { _, _ ->
+      client.pair(server)
+      this.server.enqueue(server)
+    }
+    val adapter = MockSocketAdapter(client)
+    if (host != null) {
+      adapter.connect(InetSocketAddress(host, port))
+    }
+    return adapter
   }
+
   override fun createSocket(
-    host: String?,
-    port: Int,
-    localHost: InetAddress?,
-    localPort: Int
+          host: String?,
+          port: Int,
+          localHost: InetAddress?,
+          localPort: Int
   ): JavaNetSocket {
-    // TODO set local host and port
-    println("${Thread.currentThread()} createSocket($host,$port")
-    val (client, server) = MockSocket.pair(clock, profile)
-    this.server.enqueue(server)
-    return MockSocketAdapter(client)
+    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    client.onConnect = { _, _ ->
+      client.pair(server)
+      this.server.enqueue(server)
+    }
+    val adapter = MockSocketAdapter(client)
+    if (localHost != null || localPort != 0) {
+      adapter.bind(InetSocketAddress(localHost, localPort))
+    }
+    if (host != null) {
+      adapter.connect(InetSocketAddress(host, port))
+    }
+    return adapter
   }
 
   override fun createSocket(address: InetAddress?, port: Int): JavaNetSocket {
-    // TODO set local host and port
-    println("${Thread.currentThread()} createSocket($address,$port")
-    val (client, server) = MockSocket.pair(clock, profile)
-    this.server.enqueue(server)
-    return MockSocketAdapter(client)
+    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    client.onConnect = { _, _ ->
+      client.pair(server)
+      this.server.enqueue(server)
+    }
+    val adapter = MockSocketAdapter(client)
+    if (address != null) {
+      adapter.connect(InetSocketAddress(address, port))
+    }
+    return adapter
   }
+
   override fun createSocket(
-    address: InetAddress?,
-    port: Int,
-    localAddress: InetAddress?,
-    localPort: Int
+          address: InetAddress?,
+          port: Int,
+          localAddress: InetAddress?,
+          localPort: Int
   ): JavaNetSocket {
-    // TODO set local host and port
-    println("${Thread.currentThread()} createSocket($address,$port")
     val (client, server) = MockSocket.pair(clock, profile)
-    this.server.enqueue(server)
-    return MockSocketAdapter(client)
+    client.onConnect = { _, _ ->
+      client.pair(server)
+      this.server.enqueue(server)
+    }
+    val adapter = MockSocketAdapter(client)
+    if (localAddress != null || localPort != 0) {
+      adapter.bind(InetSocketAddress(localAddress, localPort))
+    }
+    if (address != null) {
+      adapter.connect(InetSocketAddress(address, port))
+    }
+    return adapter
   }
 }

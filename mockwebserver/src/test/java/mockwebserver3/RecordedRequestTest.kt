@@ -40,11 +40,15 @@ class RecordedRequestTest {
                 remoteAddress: InetAddress = localAddress,
                 remotePort: Int = 1234
         ): MockWebServerSocket {
-                val (client, _) = MockSocket.pair()
-                client.localAddress = localAddress
-                client.localPort = localPort
-                client.remoteAddress = remoteAddress
-                client.remotePort = remotePort
+                val (client, server) = MockSocket.pair()
+          client.pair(server)
+          client.localAddress = localAddress
+          client.localPort = localPort
+          server.localAddress = remoteAddress
+          server.localPort = remotePort
+          // TODO these should be valid values
+          client.onConnect("localhost", 8080)
+          server.onConnect(null, 49152)
                 return MockWebServerSocket(client.asSocket())
         }
 

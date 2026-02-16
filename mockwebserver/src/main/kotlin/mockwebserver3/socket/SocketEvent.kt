@@ -16,74 +16,103 @@
 package mockwebserver3.socket
 
 public sealed class SocketEvent {
-    public abstract val timestampNanos: Long
-    public abstract val threadName: String
-    public abstract val socketName: String
+        public abstract val timestampNanos: Long
+        public abstract val threadName: String
+        public abstract val socketName: String
 
-    public data class ReadSuccess(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String,
-            val byteCount: Long
-    ) : SocketEvent()
+        public data class ReadSuccess(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val byteCount: Long
+        ) : SocketEvent()
 
-    public data class ReadFailed(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String,
-            val reason: String
-    ) : SocketEvent()
+        public data class ReadFailed(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val reason: String
+        ) : SocketEvent()
 
-    public data class ReadWait(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String,
-            val waitNanos: Long
-    ) : SocketEvent()
+        public data class ReadWait(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val waitNanos: Long
+        ) : SocketEvent()
 
-    public data class ReadEof(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String
-    ) : SocketEvent()
+        public data class ReadEof(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String
+        ) : SocketEvent()
 
-    public data class WriteSuccess(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String,
-            val byteCount: Long,
-            val arrivalTimeNanos: Long
-    ) : SocketEvent()
+        public data class WriteSuccess(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val byteCount: Long,
+                val arrivalTimeNanos: Long
+        ) : SocketEvent()
 
-    public data class WriteFailed(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String,
-            val reason: String
-    ) : SocketEvent()
+        public data class WriteFailed(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val reason: String
+        ) : SocketEvent()
 
-    public data class WriteWaitBufferFull(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String,
-            val bufferSize: Long
-    ) : SocketEvent()
+        public data class WriteWaitBufferFull(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val bufferSize: Long
+        ) : SocketEvent()
 
-    public data class Close(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String
-    ) : SocketEvent()
+        public data class Close(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String
+        ) : SocketEvent()
 
-    public data class ShutdownInput(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String
-    ) : SocketEvent()
+        public data class ShutdownInput(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String
+        ) : SocketEvent()
 
-    public data class ShutdownOutput(
-            override val timestampNanos: Long,
-            override val threadName: String,
-            override val socketName: String
-    ) : SocketEvent()
+        public data class ShutdownOutput(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String
+        ) : SocketEvent()
+
+        public data class Connect(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val host: String?,
+                val port: Int
+        ) : SocketEvent()
+
+        public data class AcceptStarting(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String
+        ) : SocketEvent()
+
+        public data class AcceptReturning(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val peerSocketName: String
+        ) : SocketEvent()
+
+        public data class DataArrival(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                val byteCount: Long,
+                val arrivalTimeNanos: Long
+        ) : SocketEvent()
 }
