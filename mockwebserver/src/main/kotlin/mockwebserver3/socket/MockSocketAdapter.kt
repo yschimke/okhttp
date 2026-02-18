@@ -15,139 +15,157 @@
  */
 package mockwebserver3.socket
 
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetAddress
 import java.net.Socket as JavaNetSocket
-import java.nio.channels.SocketChannel
-import okio.IOException
-import okio.buffer
+import java.net.SocketAddress
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
+import okio.Buffer
+import okio.Sink
+import okio.Socket as OkioSocket
+import okio.Source
+import okio.Timeout
 
-internal class MockSocketAdapter(private val mockSocket: MockSocket) : JavaNetSocket() {
-  override fun getInputStream() = mockSocket.source.buffer().inputStream()
-  override fun getOutputStream() = mockSocket.sink.buffer().outputStream()
-  override fun getInetAddress() = mockSocket.remoteAddress
-  override fun getLocalAddress() = mockSocket.localAddress
-  override fun getLocalPort() = mockSocket.localPort
-  override fun getPort() = mockSocket.remotePort
-  override fun close() = mockSocket.close()
-  override fun shutdownInput() = mockSocket.shutdownInput()
-  override fun shutdownOutput() = mockSocket.shutdownOutput()
+internal class MockSocketAdapter(private val mockSocket: MockSocket) : JavaNetSocket(), OkioSocket {
+  override fun getInputStream(): InputStream =
+          object : InputStream() {
+            override fun read(): Int {
+              val buffer = Buffer()
+              val read = runBlocking { mockSocket.readSuspending(buffer, 1) }
+              return if (read == -1L) -1 else buffer.readByte().toInt() and 0xff
+            }
 
-  override fun isBound(): Boolean = true // Always bound in MockSocket pair
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+              val buffer = Buffer()
+              val read = runBlocking { mockSocket.readSuspending(buffer, len.toLong()) }
+              if (read == -1L) return -1
+              buffer.read(b, off, read.toInt())
+              return read.toInt()
+            }
 
+            override fun available(): Int =
+                    0 // Not accurately supportable without blocking/mutex issues
+
+            override fun close(): Unit = runBlocking { mockSocket.shutdownInputSuspending() }
+          }
+
+  override fun getOutputStream(): OutputStream =
+          object : OutputStream() {
+            override fun write(b: Int): Unit = runBlocking {
+              val buffer = Buffer().writeByte(b)
+              mockSocket.writeSuspending(buffer, 1)
+            }
+
+            override fun write(b: ByteArray, off: Int, len: Int): Unit = runBlocking {
+              val buffer = Buffer().write(b, off, len)
+              mockSocket.writeSuspending(buffer, len.toLong())
+            }
+
+            override fun close(): Unit = runBlocking { mockSocket.shutdownOutputSuspending() }
+          }
+
+  override fun getInetAddress(): InetAddress = mockSocket.remoteAddress
+  override fun getLocalAddress(): InetAddress =
+          mockSocket.localAddress ?: InetAddress.getLoopbackAddress()
+  override fun getLocalPort(): Int = mockSocket.localPort
+  override fun getPort(): Int = mockSocket.remotePort
+  override fun close(): Unit = runBlocking { mockSocket.closeSuspending() }
+  override fun shutdownInput(): Unit = runBlocking { mockSocket.shutdownInputSuspending() }
+  override fun shutdownOutput(): Unit = runBlocking { mockSocket.shutdownOutputSuspending() }
+
+  override fun isBound(): Boolean = true
   override fun isConnected(): Boolean = mockSocket.isConnected
-
   override fun isClosed(): Boolean = mockSocket.closed
-
   override fun isInputShutdown(): Boolean = mockSocket.inputShutdown
-
   override fun isOutputShutdown(): Boolean = mockSocket.outputShutdown
 
-  override fun connect(endpoint: java.net.SocketAddress) {
-    if (isConnected) {
-      throw IOException("Already Connected")
-    }
-
-    mockSocket.connect(endpoint)
+  override fun connect(endpoint: SocketAddress): Unit = runBlocking {
+    mockSocket.connectSuspending(endpoint)
   }
 
-  override fun connect(endpoint: java.net.SocketAddress, timeout: Int) {
-    if (isConnected) {
-      throw IOException("Already Connected")
-    }
-
-    mockSocket.connect(endpoint, timeout)
+  override fun connect(endpoint: SocketAddress, timeout: Int): Unit = runBlocking {
+    mockSocket.connect(endpoint, TimeUnit.MILLISECONDS.toNanos(timeout.toLong()))
   }
 
-  override fun bind(bindpoint: java.net.SocketAddress) {
-    if (isConnected) {
-      throw IOException("Already Connected")
-    }
+  override fun bind(bindpoint: SocketAddress): Unit = runBlocking { mockSocket.bind(bindpoint) }
 
-    mockSocket.bind(bindpoint)
-  }
-
-  override fun getRemoteSocketAddress(): java.net.SocketAddress =
+  override fun getRemoteSocketAddress(): SocketAddress =
           java.net.InetSocketAddress(mockSocket.remoteAddress, mockSocket.remotePort)
 
-  override fun getLocalSocketAddress(): java.net.SocketAddress =
-          java.net.InetSocketAddress(mockSocket.localAddress, mockSocket.localPort)
+  override fun getLocalSocketAddress(): SocketAddress =
+          java.net.InetSocketAddress(getLocalAddress(), mockSocket.localPort)
 
-  override fun getReuseAddress(): Boolean {
-    return mockSocket.reuseAddress
+  override fun getReuseAddress(): Boolean = mockSocket.reuseAddress
+  override fun setReuseAddress(reuse: Boolean): Unit {
+    mockSocket.reuseAddress = reuse
   }
 
-  override fun setReuseAddress(p0: Boolean) {
-    mockSocket.reuseAddress = p0
+  override fun getKeepAlive(): Boolean = mockSocket.keepAlive
+  override fun setKeepAlive(keepAlive: Boolean): Unit {
+    mockSocket.keepAlive = keepAlive
   }
 
-  override fun getTrafficClass(): Int {
-    TODO()
+  override fun getReceiveBufferSize(): Int = mockSocket.receiveBufferSize
+  override fun setReceiveBufferSize(size: Int): Unit {
+    mockSocket.receiveBufferSize = size
   }
 
-  override fun setTrafficClass(p0: Int) {
-    TODO()
+  override fun getSendBufferSize(): Int = mockSocket.sendBufferSize
+  override fun setSendBufferSize(size: Int): Unit {
+    mockSocket.sendBufferSize = size
   }
 
-  override fun getKeepAlive(): Boolean {
-    return mockSocket.keepAlive
+  override fun getSoTimeout(): Int = mockSocket.soTimeout
+  override fun setSoTimeout(timeout: Int): Unit {
+    mockSocket.soTimeout = timeout
   }
 
-  override fun setKeepAlive(p0: Boolean) {
-    mockSocket.keepAlive = p0
+  override fun getOOBInline(): Boolean = mockSocket.oobInline
+  override fun setOOBInline(oobInline: Boolean): Unit {
+    mockSocket.oobInline = oobInline
   }
 
-  override fun getReceiveBufferSize(): Int {
-    return mockSocket.receiveBufferSize
+  override fun getSoLinger(): Int = mockSocket.soLinger
+  override fun setSoLinger(on: Boolean, linger: Int): Unit {
+    mockSocket.soLinger = if (on) linger else -1
   }
 
-  override fun setReceiveBufferSize(p0: Int) {
-    mockSocket.receiveBufferSize = p0
+  override fun getTcpNoDelay(): Boolean = mockSocket.tcpNoDelay
+  override fun setTcpNoDelay(tcpNoDelay: Boolean): Unit {
+    mockSocket.tcpNoDelay = tcpNoDelay
   }
 
-  override fun getSendBufferSize(): Int {
-    return mockSocket.sendBufferSize
-  }
+  // okio.Socket overrides
+  override val source: Source =
+          object : Source {
+            override fun read(sink: Buffer, byteCount: Long): Long = runBlocking {
+              mockSocket.readSuspending(sink, byteCount, timeout())
+            }
+            override fun timeout(): Timeout =
+                    mockSocket.clock.newTimeout().apply {
+                      if (mockSocket.soTimeout > 0)
+                              timeout(mockSocket.soTimeout.toLong(), TimeUnit.MILLISECONDS)
+                    }
+            override fun close(): Unit = runBlocking { mockSocket.closeSuspending() }
+          }
 
-  override fun setSendBufferSize(p0: Int) {
-    mockSocket.sendBufferSize = p0
-  }
+  override val sink: Sink =
+          object : Sink {
+            override fun write(source: Buffer, byteCount: Long): Unit = runBlocking {
+              mockSocket.writeSuspending(source, byteCount, timeout())
+            }
+            override fun flush(): Unit {}
+            override fun timeout(): Timeout =
+                    mockSocket.clock.newTimeout().apply {
+                      if (mockSocket.soTimeout > 0)
+                              timeout(mockSocket.soTimeout.toLong(), TimeUnit.MILLISECONDS)
+                    }
+            override fun close(): Unit = runBlocking { mockSocket.closeSuspending() }
+          }
 
-  override fun getSoTimeout(): Int {
-    return mockSocket.soTimeout
-  }
+  override fun cancel(): Unit {}
 
-  override fun setSoTimeout(p0: Int) {
-    mockSocket.soTimeout = p0
-  }
-
-  override fun getOOBInline(): Boolean {
-    return mockSocket.oobInline
-  }
-
-  override fun setOOBInline(p0: Boolean) {
-    mockSocket.oobInline = p0
-  }
-
-  override fun sendUrgentData(p0: Int) {
-    super.sendUrgentData(p0)
-  }
-
-  override fun getSoLinger(): Int {
-    return mockSocket.soLinger
-  }
-
-  override fun setSoLinger(p0: Boolean, p1: Int) {
-    mockSocket.soLinger = p1
-  }
-
-  override fun getTcpNoDelay(): Boolean {
-    return mockSocket.tcpNoDelay
-  }
-
-  override fun setTcpNoDelay(p0: Boolean) {
-    mockSocket.tcpNoDelay = p0
-  }
-
-  override fun getChannel(): SocketChannel? {
-    TODO()
-  }
+  override fun getChannel(): java.nio.channels.SocketChannel? = null
 }

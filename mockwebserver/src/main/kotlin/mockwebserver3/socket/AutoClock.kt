@@ -17,30 +17,31 @@ package mockwebserver3.socket
 
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.Condition
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 
 /**
- * A clock that automatically advances by the appropriate amount of time given the client/server IO
+ * A clock that automatically advances time when nothing is happening. Use this for tests where the
+ * exact timing of clock advancements doesn't matter, but you still want to test timeout
  * interactions and timeouts.
  */
 public class AutoClock : FakeClock() {
-    override fun await(condition: Condition, timeoutNanos: Long) {
+    override suspend fun await(timeoutNanos: Long): Unit {
         if (timeoutNanos <= 0) return
 
         val startRealTime = System.nanoTime()
         val realLimit =
                 TimeUnit.SECONDS.toNanos(1) // 1 second real-world timeout for deadlock detection
 
-        // Yield execution briefly on the real clock to allow other threads to run
-        // without advancing simulated time. If someone signals us (e.g. they write
-        // data), we don't need to advance time yet.
         var loopCount = 0
         while (true) {
             loopCount++
-            if (loopCount % 1000 == 0) {
-                println("AutoClock loop count: $loopCount")
-            }
-            if (condition.await(1, TimeUnit.MILLISECONDS)) return
+            yield()
+
+            // Brief wait for external signal
+            val signaled = withTimeoutOrNull(1) { timeChanged.first() }
+            if (signaled != null) return
 
             val nowRealTime = System.nanoTime()
             if (nowRealTime - startRealTime >= realLimit) {
@@ -52,10 +53,12 @@ public class AutoClock : FakeClock() {
 
             // Only if we weren't signaled after a brief real wait, we advance simulated time.
             if (timeoutNanos < Long.MAX_VALUE) {
-                println("AutoClock: advancing by $timeoutNanos nanos")
                 advanceBy(timeoutNanos)
                 return
             }
+
+            // If it's infinite wait, we just wait for timeChanged.
+            timeChanged.first()
         }
     }
 }

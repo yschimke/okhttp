@@ -47,6 +47,20 @@ public sealed class SocketEvent {
                 override val socketName: String
         ) : SocketEvent()
 
+        public data class ReadTimeout(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                public val timeoutMs: Int
+        ) : SocketEvent()
+
+        public data class TimeoutReached(
+                override val timestampNanos: Long,
+                override val threadName: String,
+                override val socketName: String,
+                public val message: String
+        ) : SocketEvent()
+
         public data class WriteSuccess(
                 override val timestampNanos: Long,
                 override val threadName: String,

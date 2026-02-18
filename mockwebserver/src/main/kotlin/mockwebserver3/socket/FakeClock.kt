@@ -15,30 +15,34 @@
  */
 package mockwebserver3.socket
 
-import java.io.IOException
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.Condition
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** A clock that can be manually advanced for testing. */
 public open class FakeClock : Clock {
-    protected val lock: ReentrantLock = ReentrantLock()
-    protected val condition: Condition = lock.newCondition()
-    protected var nanoTime: Long = 0L
+    private val _nanoTime: AtomicLong = AtomicLong(0)
+    private val mutex: Mutex = Mutex()
+    public var onWait: ((Long) -> Unit)? = null
+    public val timeChanged: MutableSharedFlow<Unit> =
+            MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
 
-    override fun nanoTime(): Long = lock.withLock { nanoTime }
+    override fun nanoTime(): Long = _nanoTime.get()
 
     /** Advances the clock by [nanos] and notifies any waiting threads. */
-    public fun advanceBy(nanos: Long, unit: TimeUnit) {
-        lock.withLock {
-            nanoTime += unit.toNanos(nanos)
-            condition.signalAll()
+    public suspend fun advanceBy(nanos: Long, unit: TimeUnit): Unit {
+        mutex.withLock {
+            _nanoTime.addAndGet(unit.toNanos(nanos))
+            timeChanged.emit(Unit)
         }
     }
 
     /** Advances the clock by [nanos] and notifies any waiting threads. */
-    public fun advanceBy(nanos: Long) {
+    public suspend fun advanceBy(nanos: Long): Unit {
         advanceBy(nanos, TimeUnit.NANOSECONDS)
     }
 
@@ -46,46 +50,31 @@ public open class FakeClock : Clock {
      * Waits until the clock has advanced by [nanos]. This does NOT advance the clock itself; it
      * just waits for someone else to advance it.
      */
-    public fun sleep(nanos: Long) {
-        lock.withLock {
-            val target = nanoTime + nanos
-            while (nanoTime < target) {
-                condition.await()
-            }
+    public suspend fun sleep(nanos: Long): Unit {
+        onWait?.invoke(nanos)
+        val target = _nanoTime.get() + nanos
+        while (_nanoTime.get() < target) {
+            timeChanged.first()
         }
     }
 
-    override fun await(condition: Condition, timeoutNanos: Long) {
-        val startNanoTime = lock.withLock { nanoTime }
-        val startRealTime = System.nanoTime()
-        val realLimit =
-                TimeUnit.SECONDS.toNanos(1) // 1 second real-world timeout for deadlock detection
-        var loopCount = 0
-        while (true) {
-            loopCount++
-            if (loopCount % 1000 == 0) {
-                println("FakeClock loop count: $loopCount")
-            }
-            val nowRealTime = System.nanoTime()
-            if (nowRealTime - startRealTime >= realLimit) {
-                throw IOException(
-                        "Real-world timeout of 1s reached! Possible deadlock in FakeClock usage. " +
-                                "(looped $loopCount times)"
-                )
-            }
-
-            // Check if simulated time has already passed the required duration
-            val nowNanoTime = lock.withLock { nanoTime }
-            if (nowNanoTime - startNanoTime >= timeoutNanos) {
-                return
-            }
-
-            // Wait for 10ms to see if the condition is signaled
-            if (condition.await(10, TimeUnit.MILLISECONDS)) {
-                return // Signaled!
-            }
+    override suspend fun await(timeoutNanos: Long): Unit {
+        onWait?.invoke(timeoutNanos)
+        val startNanoTime = _nanoTime.get()
+        while (_nanoTime.get() - startNanoTime < timeoutNanos) {
+            timeChanged.first()
         }
     }
 
-    override fun newTimeout(): okio.Timeout = okio.Timeout()
+    override fun monitor(): kotlinx.coroutines.flow.Flow<Unit> = timeChanged
+
+    override fun newTimeout(
+            sharedEvents: MutableList<SocketEvent>?,
+            socketName: String?
+    ): okio.Timeout = FakeTimeout(this, sharedEvents, socketName)
+}
+
+/** Suspending API to monitor actions on a [FakeClock]. */
+public suspend fun FakeClock.monitor(block: suspend () -> Unit) {
+    coroutineScope { block() }
 }

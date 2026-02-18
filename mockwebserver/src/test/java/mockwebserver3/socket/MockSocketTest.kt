@@ -27,9 +27,8 @@ import java.util.Random
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
-import mockwebserver3.socket.MockSocket.RecordMode
-import okio.buffer
+import kotlinx.coroutines.runBlocking
+import okio.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 
@@ -37,8 +36,8 @@ import org.junit.jupiter.api.Timeout
 @Burst
 public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISABLED) {
     @Test
-    public fun pairCommunication() {
-        val (client, server) = MockSocket.pair().apply { connect() }
+    public fun pairCommunication(): Unit = runBlocking {
+        val (client, server) = MockSocket.pair().connectSuspending()
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -50,9 +49,9 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     }
 
     @Test
-    public fun readTimeout() {
+    public fun readTimeout(): Unit = runBlocking {
         val clock = AutoClock()
-        val (client, server) = MockSocket.pair(clock).apply { connect() }
+        val (client, server) = MockSocket.pair(clock).connect()
         client.recordMode = recordMode
 
         client.source.timeout().timeout(100, TimeUnit.MILLISECONDS)
@@ -62,8 +61,8 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     }
 
     @Test
-    public fun faultInjectionRead() {
-        val (client, server) = MockSocket.pair().apply { connect() }
+    public fun faultInjectionRead(): Unit = runBlocking {
+        val (client, server) = MockSocket.pair().connectSuspending()
         client.recordMode = recordMode
 
         client.faults =
@@ -77,7 +76,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     }
 
     @Test
-    public fun latencySimulation() {
+    public fun latencySimulation(): Unit = runBlocking {
         val clock = FakeClock()
         val (client, server) =
                 MockSocket.pair(
@@ -87,7 +86,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
                                                 latencyNanos = TimeUnit.MILLISECONDS.toNanos(100)
                                         )
                         )
-                        .apply { connect() }
+                        .connect()
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -97,25 +96,24 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
         clientSink.writeUtf8("hello").flush()
 
         // At t=0, server should not see data yet
-        assertThat(clock.nanoTime()).isEqualTo(0L)
+        assertThat(clock.now).isEqualTo(0L)
 
         // Advance clock BEFORE reading to simulate time passing.
-        // No thread needed here because we are not yet blocked on the read call.
         clock.advanceBy(100, TimeUnit.MILLISECONDS)
 
         assertThat(serverSource.readUtf8(5)).isEqualTo("hello")
-        assertThat(clock.nanoTime()).isEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
+        assertThat(clock.now).isEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
     }
 
     @Test
-    public fun throughputSimulation() {
+    public fun throughputSimulation(): Unit = runBlocking {
         val clock = FakeClock()
         val (client, server) =
                 MockSocket.pair(
                                 clock = clock,
                                 profile = NetworkProfile(bytesPerSecond = 1000) // 1 KB/s
                         )
-                        .apply { connect() }
+                        .connect()
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -124,14 +122,14 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
 
         clientSink.write(ByteArray(1000)).flush()
 
-        assertThat(clock.nanoTime()).isEqualTo(TimeUnit.SECONDS.toNanos(1))
+        assertThat(clock.now).isEqualTo(TimeUnit.SECONDS.toNanos(1))
         assertThat(serverSource.readByteArray(1000).size).isEqualTo(1000)
     }
 
     @Test
-    public fun slowMobileProfile() {
+    public fun slowMobileProfile(): Unit = runBlocking {
         val clock = FakeClock()
-        val (client, server) = MockSocket.slowMobile(clock)
+        val (client, server) = MockSocket.slowMobile(clock).connect()
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -139,12 +137,12 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
 
         // 200ms latency and 100KB/s throughput.
         // 1 byte takes 10,000ns.
-        assertThat(clock.nanoTime()).isEqualTo(10_000L)
+        assertThat(clock.now).isEqualTo(10_000L)
 
         clock.advanceBy(200, TimeUnit.MILLISECONDS)
 
         assertThat(server.source.buffer().readUtf8(1)).isEqualTo("a")
-        assertThat(clock.nanoTime()).isEqualTo(TimeUnit.MILLISECONDS.toNanos(200) + 10_000L)
+        assertThat(clock.now).isEqualTo(TimeUnit.MILLISECONDS.toNanos(200) + 10_000L)
     }
 
     /**
@@ -153,13 +151,13 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
      * the FakeClock and the sequence/timestamps of recorded events.
      */
     @Test
-    public fun deterministicPingPongWithJitter() = runTest {
+    public fun deterministicPingPongWithJitter(): Unit = runBlocking {
         // Use AutoClock to automatically advance time when blocked waiting for I/O.
         val clock = AutoClock()
         // Use a profile with latency to force the clock to advance.
         val latencyNanos = TimeUnit.MILLISECONDS.toNanos(10)
         val profile = NetworkProfile(latencyNanos = latencyNanos)
-        val (client, server) = MockSocket.pair(clock, profile).apply { connect() }
+        val (client, server) = MockSocket.pair(clock, profile).connect()
         client.name = "Client"
         server.name = "Server"
         client.recordMode = recordMode
@@ -214,8 +212,8 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     }
 
     @Test
-    public fun shutdownOutput() {
-        val (client, server) = MockSocket.pair().apply { connect() }
+    public fun shutdownOutput(): Unit = runBlocking {
+        val (client, server) = MockSocket.pair().connectSuspending()
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -226,8 +224,8 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     }
 
     @Test
-    public fun shutdownInput() {
-        val (client, server) = MockSocket.pair().apply { connect() }
+    public fun shutdownInput(): Unit = runBlocking {
+        val (client, server) = MockSocket.pair().connectSuspending()
         client.recordMode = recordMode
 
         client.shutdownInput()
@@ -236,9 +234,9 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
     }
 
     @Test
-    public fun autoClock() {
+    public fun autoClock(): Unit = runBlocking {
         val clock = AutoClock()
-        val (client, server) = MockSocket.pair(clock).apply { connect() }
+        val (client, server) = MockSocket.pair(clock).connect()
         client.recordMode = recordMode
         server.recordMode = recordMode
 
@@ -250,6 +248,6 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
                 .isInstanceOf(InterruptedIOException::class.java)
 
         // The clock should have advanced by exactly 100ms.
-        assertThat(clock.nanoTime()).isEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
+        assertThat(clock.now).isEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
     }
 }

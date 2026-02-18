@@ -20,35 +20,44 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket as JavaNetSocket
-import java.util.concurrent.locks.ReentrantLock
 import javax.net.ServerSocketFactory
 import javax.net.SocketFactory
 import kotlin.concurrent.withLock
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 public class MockServerSocket(
         public val clock: Clock = Clock.SYSTEM,
         public val profile: NetworkProfile = NetworkProfile(),
         public val sharedEvents: MutableList<SocketEvent> = mutableListOf()
-) : ServerSocket() {
-  private val lock = ReentrantLock()
-  private val condition = lock.newCondition()
+) {
+  private val mutex = Mutex()
+  private val stateChanged = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+  private fun notifyStateChanged(): Unit {
+    stateChanged.tryEmit(Unit)
+  }
   private val queue = mutableListOf<MockSocket>()
+  public var backlog: Int = 50
   private var closed = false
 
-  // TODO set properly
-  public var backlog: Int = 0
+  public suspend fun awaitState(predicate: () -> Boolean) {
+    while (!predicate()) {
+      kotlinx.coroutines.flow.merge(stateChanged, clock.monitor()).first()
+    }
+  }
 
-  override fun accept(): JavaNetSocket {
-    lock.withLock {
-      recordEvent(
-              SocketEvent.AcceptStarting(clock.nanoTime(), Thread.currentThread().name, toString())
-      )
-      while (queue.isEmpty()) {
-        if (closed) throw IOException("closed")
-        clock.await(condition, Long.MAX_VALUE)
-      }
+  public suspend fun acceptSuspending(): MockSocket {
+    recordEventSuspending(
+            SocketEvent.AcceptStarting(clock.nanoTime(), Thread.currentThread().name, toString())
+    )
+    awaitState { queue.isNotEmpty() || closed }
+    mutex.withLock {
+      if (closed) throw IOException("closed")
       val socket = queue.removeAt(0)
-      recordEvent(
+      recordEventSuspending(
               SocketEvent.AcceptReturning(
                       clock.nanoTime(),
                       Thread.currentThread().name,
@@ -56,67 +65,80 @@ public class MockServerSocket(
                       socket.name
               )
       )
-      return socket.asSocket()
+      return socket
     }
   }
 
-  private fun recordEvent(event: SocketEvent) {
-    lock.withLock { sharedEvents.add(event) }
+  private suspend fun recordEventSuspending(event: SocketEvent): Unit {
+    mutex.withLock {
+      sharedEvents.add(event)
+      notifyStateChanged()
+    }
   }
 
-  override fun close() {
-    lock.withLock {
+  public suspend fun closeSuspending(): Unit {
+    mutex.withLock {
       if (closed) return
       closed = true
-      condition.signalAll()
+      notifyStateChanged()
       for (socket in queue) {
-        socket.close()
+        socket.closeSuspending()
       }
       queue.clear()
     }
   }
 
-  private var localPort = 0
+  public var localAddress: java.net.InetAddress? = null
+  private var _localPort: Int = 0
+  public var localPort: Int
+    get() = if (_localPort == 0) 80 else _localPort
+    set(value) {
+      _localPort = value
+    }
 
-  override fun bind(endpoint: java.net.SocketAddress?, backlog: Int) {
+  public fun bind(endpoint: java.net.SocketAddress?, backlog: Int): Unit {
     if (endpoint is InetSocketAddress) {
       localPort = endpoint.port
+      localAddress = endpoint.address
     }
+    this.backlog = backlog
   }
 
-  override fun bind(endpoint: java.net.SocketAddress?) {
+  public fun bind(endpoint: java.net.SocketAddress?): Unit {
     bind(endpoint, 50)
   }
 
-  override fun getLocalPort(): Int = if (localPort == 0) 80 else localPort
-  override fun getInetAddress(): InetAddress = InetAddress.getLoopbackAddress()
-  override fun getLocalSocketAddress(): java.net.SocketAddress =
-          InetSocketAddress(inetAddress, localPort)
+  public fun getInetAddress(): InetAddress = localAddress ?: InetAddress.getLoopbackAddress()
+  public fun getLocalSocketAddress(): java.net.SocketAddress =
+          InetSocketAddress(getInetAddress(), localPort)
 
   override fun toString(): String = "MockServerSocket[port=$localPort]"
 
-  public fun enqueue(socket: MockSocket) {
-    lock.withLock {
-      if (closed) {
-        socket.close()
-        return
+  public fun enqueue(socket: MockSocket): Unit = runBlocking {
+    mutex.withLock {
+      if (closed || (backlog > 0 && queue.size >= backlog)) {
+        socket.closeSuspending()
+        return@withLock
       }
       queue.add(socket)
-      condition.signal()
+      notifyStateChanged()
     }
   }
+
+  public fun asServerSocket(): java.net.ServerSocket = MockServerSocketAdapter(this)
 }
 
 public fun MockServerSocket.asServerSocketFactory(): ServerSocketFactory =
         object : ServerSocketFactory() {
-          override fun createServerSocket() = this@asServerSocketFactory
+          override fun createServerSocket() = this@asServerSocketFactory.asServerSocket()
           override fun createServerSocket(port: Int): ServerSocket =
-                  this@asServerSocketFactory.apply { bind(InetSocketAddress(port)) }
+                  this@asServerSocketFactory.asServerSocket().apply {
+                    bind(InetSocketAddress(port))
+                  }
 
           override fun createServerSocket(port: Int, backlog: Int): ServerSocket =
-                  this@asServerSocketFactory.apply {
-                    this.backlog = backlog
-                    bind(InetSocketAddress(port))
+                  this@asServerSocketFactory.asServerSocket().apply {
+                    bind(InetSocketAddress(port), backlog)
                   }
 
           override fun createServerSocket(
@@ -124,11 +146,11 @@ public fun MockServerSocket.asServerSocketFactory(): ServerSocketFactory =
                   backlog: Int,
                   ifAddress: InetAddress?
           ): ServerSocket =
-                  this@asServerSocketFactory.apply {
-                    this.backlog = backlog
+                  this@asServerSocketFactory.asServerSocket().apply {
                     bind(
                             if (ifAddress != null) InetSocketAddress(ifAddress, port)
-                            else InetSocketAddress(port)
+                            else InetSocketAddress(port),
+                            backlog
                     )
                   }
         }
@@ -200,7 +222,7 @@ public class MockSocketFactory(
           localAddress: InetAddress?,
           localPort: Int
   ): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile)
+    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
     client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)

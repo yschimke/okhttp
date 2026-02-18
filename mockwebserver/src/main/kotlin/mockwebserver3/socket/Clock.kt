@@ -15,27 +15,38 @@
  */
 package mockwebserver3.socket
 
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.Condition
+import kotlinx.coroutines.delay
 
-/** A clock to control time in tests. */
+/**
+ * A clock to control time in tests.
+ *
+ * Clocks provide two main capabilities:
+ * 1. Tracking current time with [nanoTime].
+ * 2. Delaying operations with [await].
+ *
+ * In [SYSTEM] and [AutoClock] modes, [await] advances time (real or simulated) as needed. In a
+ * manual [FakeClock] mode, [await] blocks until the clock is advanced externally, allowing for
+ * fine-grained control over test timing.
+ */
 public interface Clock {
     /** Returns the current time in nanoseconds. */
     public fun nanoTime(): Long
 
-    /**
-     * Waits for [condition] to be signaled or for [timeoutNanos] to elapse.
-     *
-     * Returns true if the condition was signaled, or false if the timeout elapsed.
-     */
-    public fun await(condition: Condition, timeoutNanos: Long)
+    /** Waits for [timeoutNanos] to elapse on this clock. */
+    public suspend fun await(timeoutNanos: Long): Unit
+
+    /** Returns a flow that emits whenever the clock advances or state changes. */
+    public fun monitor(): kotlinx.coroutines.flow.Flow<Unit>
 
     /** Returns [nanoTime] in nanoseconds. */
     public val now: Long
         get() = nanoTime()
 
     /** Returns a [Timeout] that uses this clock to track time and deadlines. */
-    public fun newTimeout(): okio.Timeout = okio.Timeout()
+    public fun newTimeout(
+            sharedEvents: MutableList<SocketEvent>? = null,
+            socketName: String? = null
+    ): okio.Timeout = okio.Timeout()
 
     public companion object {
         @JvmField
@@ -43,9 +54,17 @@ public interface Clock {
                 object : Clock {
                     override fun nanoTime(): Long = System.nanoTime()
 
-                    override fun await(condition: Condition, timeoutNanos: Long) {
-                        condition.await(timeoutNanos, TimeUnit.NANOSECONDS)
+                    override suspend fun await(timeoutNanos: Long): Unit {
+                        delay(timeoutNanos / 1_000_000)
                     }
+
+                    override fun monitor(): kotlinx.coroutines.flow.Flow<Unit> =
+                            kotlinx.coroutines.flow.flow {
+                                while (true) {
+                                    emit(Unit)
+                                    delay(10)
+                                }
+                            }
                 }
     }
 }
