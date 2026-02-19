@@ -14,7 +14,6 @@ dependencies {
   implementation(libs.pkts.core)
 
   testImplementation(libs.assertk)
-  testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter.api)
   testRuntimeOnly(libs.junit.jupiter.engine)
 }
