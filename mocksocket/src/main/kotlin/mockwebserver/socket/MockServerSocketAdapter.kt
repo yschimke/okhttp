@@ -19,26 +19,37 @@ import java.net.InetAddress
 import java.net.ServerSocket as JavaNetServerSocket
 import java.net.Socket as JavaNetSocket
 import java.net.SocketAddress
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 internal class MockServerSocketAdapter(private val delegate: MockServerSocket) :
-        JavaNetServerSocket() {
-    override fun accept(): JavaNetSocket = runBlocking { delegate.acceptSuspending().asSocket() }
+  JavaNetServerSocket() {
+  override fun accept(): JavaNetSocket =
+    runBlockingTimeout { delegate.acceptSuspending().asSocket() }
 
-    override fun close(): Unit = runBlocking { delegate.closeSuspending() }
-
-    override fun bind(endpoint: SocketAddress?): Unit {
-        delegate.bind(endpoint)
+  private fun <T> runBlockingTimeout(function: suspend () -> T): T {
+    return runBlocking {
+      withTimeout(1.seconds) {
+        function()
+      }
     }
+  }
 
-    override fun bind(endpoint: SocketAddress?, backlog: Int): Unit {
-        delegate.bind(endpoint, backlog)
-    }
+  override fun close(): Unit = runBlockingTimeout { delegate.closeSuspending() }
 
-    override fun getLocalPort(): Int = delegate.localPort
-    override fun getInetAddress(): InetAddress = delegate.getInetAddress()
-    override fun getLocalSocketAddress(): SocketAddress = delegate.getLocalSocketAddress()
-    override fun isClosed(): Boolean = false // TODO track in delegate
+  override fun bind(endpoint: SocketAddress?): Unit {
+    delegate.bind(endpoint)
+  }
 
-    override fun toString(): String = delegate.toString()
+  override fun bind(endpoint: SocketAddress?, backlog: Int): Unit {
+    delegate.bind(endpoint, backlog)
+  }
+
+  override fun getLocalPort(): Int = delegate.localPort
+  override fun getInetAddress(): InetAddress = delegate.getInetAddress()
+  override fun getLocalSocketAddress(): SocketAddress = delegate.getLocalSocketAddress()
+  override fun isClosed(): Boolean = false // TODO track in delegate
+
+  override fun toString(): String = delegate.toString()
 }
