@@ -1,18 +1,3 @@
-/*
- * Copyright (C) 2026 Square, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package mockwebserver3.socket
 
 import java.io.IOException
@@ -32,27 +17,20 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
 import okio.Buffer
 
-/**
- * A mock implementation of a socket using coroutines.
- *
- * This implementation supports high-fidelity simulation of network conditions like latency and
- * throughput. It integrates with a [Clock] to allow deterministic testing.
- *
- * When using a [FakeClock] (without [AutoClock]), time advances must be triggered externally by the
- * test. The socket will [Clock.await] for the required time to elapse before completing operations
- * that are subject to network simulation.
- */
+internal class InFlightChunk(val buffer: Buffer, val availableAtNanos: Long)
+
 public class MockSocket
 internal constructor(
         public val clock: Clock,
         private val mutex: Mutex,
-        private val inputBuffer: Buffer,
-        private val outputBuffer: Buffer,
         private val profile: NetworkProfile,
         private val sharedEvents: MutableList<SocketEvent>
 ) {
     private val stateChanged = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
-    private var lastArrivalNanos = 0L
+    
+    private val inputBuffer = Buffer()
+    private val inFlight = java.util.ArrayDeque<InFlightChunk>()
+
     private fun notifyStateChanged(): Unit {
         stateChanged.tryEmit(Unit)
     }
@@ -145,20 +123,18 @@ internal constructor(
                     val result = readInternal(sink, byteCount)
                     if (result != null) return@coroutineScope result
 
-                    // Wait until the socket state changes OR the timeout expires.
-                    val waitNanos =
-                            if (timeout.hasDeadline()) {
-                                val remaining = timeout.deadlineNanoTime() - clock.nanoTime()
-                                if (remaining <= 0) timeout.throwIfReached()
-                                remaining
-                            } else {
-                                Long.MAX_VALUE
-                            }
+                    var waitNanos = Long.MAX_VALUE
+                    if (timeout.hasDeadline()) {
+                        waitNanos = timeout.deadlineNanoTime() - clock.nanoTime()
+                    }
+                    if (timeout.timeoutNanos() > 0) {
+                        waitNanos = minOf(waitNanos, timeout.timeoutNanos())
+                    }
+                    if (waitNanos <= 0) timeout.throwIfReached()
 
                     if (waitNanos == Long.MAX_VALUE) {
                         collection.receive()
                     } else {
-                        // Wait for either a state change event OR the timeout to expire.
                         val scope = this
                         val waitJob = scope.launch { clock.await(waitNanos) }
                         kotlinx.coroutines.selects.select<Unit> {
@@ -181,26 +157,27 @@ internal constructor(
 
         mutex.withLock {
             lastThread = Thread.currentThread()
-            if (inputBuffer.size > 0 || closed || inputShutdown || peer?.outputShutdown == true) {
-                if (closed) throw IOException("closed")
-                if (inputShutdown) {
-                    readResult = -1L
-                    return@withLock
-                }
-                if (inputBuffer.size == 0L && peer?.outputShutdown == true) {
-                    readResult = -1L
-                    return@withLock
-                }
+            
+            val now = clock.nanoTime()
+            while (inFlight.isNotEmpty() && now >= inFlight.first().availableAtNanos) {
+                val chunk = inFlight.removeFirst()
+                inputBuffer.writeAll(chunk.buffer)
+                notifyStateChanged()
+            }
 
-                val now = clock.nanoTime()
-                val availableAt = lastArrivalNanos + profile.latencyNanos
-                if (now < availableAt) {
-                    waitNanos = availableAt - now
-                    return@withLock
-                }
+            if (closed) throw IOException("closed")
+            if (inputShutdown) {
+                readResult = -1L
+                return@withLock
+            }
+            if (inputBuffer.size == 0L && peer?.outputShutdown == true && inFlight.isEmpty()) {
+                readResult = -1L
+                return@withLock
+            }
+            
+            faults?.maybeThrowRead(clock)
 
-                faults?.maybeThrowRead(clock)
-
+            if (inputBuffer.size > 0) {
                 val readCount = minOf(byteCount, inputBuffer.size)
                 readResult = inputBuffer.read(sink, readCount)
                 recordEvent(
@@ -213,6 +190,8 @@ internal constructor(
                 )
                 notifyStateChanged()
                 peer?.notifyStateChanged()
+            } else if (inFlight.isNotEmpty()) {
+                waitNanos = maxOf(1L, inFlight.first().availableAtNanos - now)
             } else {
                 shouldAwait = true
             }
@@ -221,12 +200,21 @@ internal constructor(
         if (readResult != null) return readResult!!
         if (waitNanos > 0) {
             clock.await(waitNanos)
-            return null // Indicate that we waited, but no data yet.
+            return null
         }
         if (shouldAwait) {
-            return null // Indicate that we need to await state change.
+            return null
         }
-        return null // Should not be reached if logic is sound, but for completeness.
+        return null
+    }
+
+    private fun peerTotalBytesBuffered(): Long {
+        val p = peer ?: return 0L
+        var total = p.inputBuffer.size
+        for (chunk in p.inFlight) {
+            total += chunk.buffer.size
+        }
+        return total
     }
 
     public suspend fun writeSuspending(
@@ -243,31 +231,49 @@ internal constructor(
         var remaining = byteCount
         while (remaining > 0) {
             timeout.throwIfReached()
-            val toWrite = minOf(remaining, sendBufferSize.toLong())
 
             var writeCompleted = false
             mutex.withLock {
                 lastThread = Thread.currentThread()
-                if (outputBuffer.size < profile.maxWriteBufferSize ||
+                val peerBuffered = peerTotalBytesBuffered()
+                
+                if (peerBuffered < profile.maxWriteBufferSize ||
                                 closed ||
                                 peer?.inputShutdown == true
                 ) {
                     if (closed) throw IOException("closed")
                     if (peer?.inputShutdown == true) throw IOException("broken pipe")
 
-                    if (profile.bytesPerSecond > 0) {
-                        val delayNanos = (toWrite * 1_000_000_000L) / profile.bytesPerSecond
-                        // This await will block the current coroutine, allowing others to run.
-                        // For AutoClock, it will advance the clock.
-                        mutex.unlock()
-                        try {
-                            clock.await(delayNanos)
-                        } finally {
-                            mutex.lock()
-                        }
+                    val maxAllowedToWrite = profile.maxWriteBufferSize - peerBuffered
+                    var toWrite = minOf(remaining, sendBufferSize.toLong())
+                    toWrite = minOf(toWrite, maxOf(1, maxAllowedToWrite))
+
+                    val p = peer
+                    if (p != null) {
+                       if (profile.bytesPerSecond > 0) {
+                           val delayNanos = (toWrite * 1_000_000_000L) / profile.bytesPerSecond
+                           mutex.unlock()
+                           try {
+                               // Simulate transmission latency! This guarantees that the caller (sender client) is bound
+                               // to the bandwidth restrictions of the NetworkProfile.
+                               clock.await(delayNanos)
+                           } finally {
+                               mutex.lock()
+                           }
+                           
+                           if (closed) throw IOException("closed")
+                           if (p.inputShutdown) throw IOException("broken pipe")
+                       }
+                       
+                       val arrivalNanos = clock.nanoTime() + profile.latencyNanos
+                       val newBuffer = Buffer()
+                       newBuffer.write(source, toWrite)
+                       p.inFlight.addLast(InFlightChunk(newBuffer, arrivalNanos))
+                       p.notifyStateChanged()
+                    } else {
+                        source.skip(toWrite)
                     }
 
-                    outputBuffer.write(source, toWrite)
                     recordEvent(
                             SocketEvent.WriteSuccess(
                                     clock.nanoTime(),
@@ -280,7 +286,6 @@ internal constructor(
                     remaining -= toWrite
                     writeCompleted = true
                     notifyStateChanged()
-                    peer?.onDataArrived(clock.nanoTime())
                 }
             }
 
@@ -293,14 +298,15 @@ internal constructor(
                                     .produceIn(this)
 
                     try {
-                        val waitNanos =
-                                if (timeout.hasDeadline()) {
-                                    val r = timeout.deadlineNanoTime() - clock.nanoTime()
-                                    if (r <= 0) timeout.throwIfReached()
-                                    r
-                                } else {
-                                    Long.MAX_VALUE
-                                }
+                        var waitNanos = Long.MAX_VALUE
+                        if (timeout.hasDeadline()) {
+                            waitNanos = timeout.deadlineNanoTime() - clock.nanoTime()
+                        }
+                        if (timeout.timeoutNanos() > 0) {
+                            waitNanos = minOf(waitNanos, timeout.timeoutNanos())
+                        }
+                        
+                        if (waitNanos <= 0) timeout.throwIfReached()
 
                         if (waitNanos == Long.MAX_VALUE) {
                             collection.receive()
@@ -341,6 +347,7 @@ internal constructor(
             )
             inputShutdown = true
             inputBuffer.clear()
+            inFlight.clear()
             notifyStateChanged()
         }
     }
@@ -373,7 +380,6 @@ internal constructor(
                     )
             )
 
-            // Simulate handshake latency (SYN / SYN-ACK / ACK)
             if (profile.latencyNanos > 0) {
                 clock.await(profile.latencyNanos)
             }
@@ -399,8 +405,33 @@ internal constructor(
     }
 
     public suspend fun connect(endpoint: SocketAddress, timeoutNanos: Long): Unit {
-        // TODO: Implement timeout usage in handshake simulation
-        connectSuspending(endpoint)
+        kotlinx.coroutines.coroutineScope {
+            val scope = this
+            val startAndTimeoutDeadline = if (timeoutNanos > 0) clock.nanoTime() + timeoutNanos else Long.MAX_VALUE
+            
+            val connectJob = launch {
+                        connectSuspending(endpoint)
+            }
+            
+            val collection = clock.monitor().produceIn(this)
+            try {
+                while(connectJob.isActive) {
+                    if (startAndTimeoutDeadline != Long.MAX_VALUE) {
+                        val remaining = startAndTimeoutDeadline - clock.nanoTime()
+                        if (remaining <= 0) {
+                            connectJob.cancel()
+                            throw java.net.SocketTimeoutException("connect timed out")
+                        }
+                    }
+                    kotlinx.coroutines.selects.select<Unit> {
+                        collection.onReceive {}
+                        connectJob.onJoin {}
+                    }
+                }
+            } finally {
+                collection.cancel()
+            }
+        }
     }
 
     public suspend fun bind(bindpoint: SocketAddress): Unit {
@@ -420,11 +451,6 @@ internal constructor(
         server.peer = this
     }
 
-    internal fun onDataArrived(nanos: Long) {
-        lastArrivalNanos = nanos
-        notifyStateChanged()
-    }
-
     public companion object {
         public fun pair(
                 clock: Clock = Clock.SYSTEM,
@@ -432,12 +458,9 @@ internal constructor(
                 sharedEvents: MutableList<SocketEvent> = mutableListOf()
         ): Pair<MockSocket, MockSocket> {
             val mutex = Mutex()
-            val buffer1 = Buffer()
-            val buffer2 = Buffer()
-            val socketA = MockSocket(clock, mutex, buffer2, buffer1, profile, sharedEvents)
-            val socketB = MockSocket(clock, mutex, buffer1, buffer2, profile, sharedEvents)
-            socketA.peer = socketB
-            socketB.peer = socketA
+            val socketA = MockSocket(clock, mutex, profile, sharedEvents)
+            val socketB = MockSocket(clock, mutex, profile, sharedEvents)
+            socketA.pair(socketB)
             socketA.name = "SocketA"
             socketB.name = "SocketB"
             return Pair(socketA, socketB)
@@ -483,7 +506,7 @@ public suspend fun Pair<MockSocket, MockSocket>.connectSuspending(): Pair<MockSo
 public fun Pair<MockSocket, MockSocket>.connect(): Pair<MockSocket, MockSocket> {
     val client = first
     val server = second
-    client.pair(server)
+    client.pair(server) // Re-pair outside lock just in case
     client.localAddress = InetAddress.getByName("127.0.0.1")
     client.localPort = 49152
     server.localAddress = InetAddress.getByName("127.0.0.1")

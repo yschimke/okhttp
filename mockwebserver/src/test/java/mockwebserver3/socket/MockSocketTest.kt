@@ -1,20 +1,4 @@
-/*
- * Copyright (C) 2026 Square, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package mockwebserver3.socket
-
 import app.cash.burst.Burst
 import assertk.assertFailure
 import assertk.assertThat
@@ -23,6 +7,7 @@ import assertk.assertions.isGreaterThanOrEqualTo
 import assertk.assertions.isInstanceOf
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.net.InetSocketAddress
 import java.util.Random
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -240,7 +225,7 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
         client.recordMode = recordMode
         server.recordMode = recordMode
 
-        client.source.timeout().timeout(100, TimeUnit.MILLISECONDS)
+        client.soTimeout = 100
 
         // This read should block for 100ms in simulated time, advancing the clock automatically.
         // It will fail with strict InterruptedIOException because no data arrived.
@@ -249,5 +234,69 @@ public class MockSocketTest(private val recordMode: RecordMode = RecordMode.DISA
 
         // The clock should have advanced by exactly 100ms.
         assertThat(clock.now).isEqualTo(TimeUnit.MILLISECONDS.toNanos(100))
+    }
+
+    @Test
+    public fun connectTimeout(): Unit = runBlocking {
+        val clock = AutoClock()
+        val (client, _) = MockSocket.pair(
+            clock = clock,
+            profile = NetworkProfile(latencyNanos = TimeUnit.SECONDS.toNanos(2))
+        )
+        client.recordMode = recordMode
+
+        // 1 second connection timeout vs 2 second simulated latency
+        assertFailure {
+            client.connect(InetSocketAddress("localhost", 80), TimeUnit.SECONDS.toNanos(1))
+        }.isInstanceOf(java.net.SocketTimeoutException::class.java)
+        
+        assertThat(clock.now).isEqualTo(TimeUnit.SECONDS.toNanos(1))
+    }
+
+    @Test
+    public fun writeTimeoutWithFullPeerBuffer(): Unit = runBlocking {
+        val clock = AutoClock()
+        val profile = NetworkProfile(
+            maxWriteBufferSize = 10,
+            bytesPerSecond = 100 // 100 bytes / second bandwidth
+        )
+        val (client, server) = MockSocket.pair(clock, profile).connect()
+
+        client.soTimeout = 100 // 100ms simulated timeout
+        
+        // Peer buffer is 10. Write 20.
+        // The first 10 bytes fit in peer buffer instantly but are paced at 100 B/s (100ms duration).
+        // The next 10 bytes block waiting for peer buffer to empty. Since we just sit there
+        // and AutoClock advances the clock endlessly when idle, the 100ms timeout triggers.
+        assertFailure {
+            client.sink.buffer().writeUtf8("12345678901234567890").flush()
+        }.isInstanceOf(InterruptedIOException::class.java)
+    }
+
+    @Test
+    public fun sequentialChunksWithLatency(): Unit = runBlocking {
+        val clock = AutoClock()
+        val (client, server) = MockSocket.pair(
+            clock = clock,
+            profile = NetworkProfile(latencyNanos = TimeUnit.MILLISECONDS.toNanos(100))
+        ).connect()
+
+        val clientSink = client.sink.buffer()
+        val serverSource = server.source.buffer()
+
+        clientSink.writeUtf8("chunk1").flush()
+        clock.advanceBy(50, TimeUnit.MILLISECONDS)
+        clientSink.writeUtf8("chunk2").flush()
+        
+        clock.advanceBy(50, TimeUnit.MILLISECONDS)
+        assertThat(serverSource.readUtf8(6)).isEqualTo("chunk1")
+
+        assertFailure {
+            server.soTimeout = 1
+            serverSource.readUtf8(6)
+        }.isInstanceOf(InterruptedIOException::class.java)
+
+        clock.advanceBy(50, TimeUnit.MILLISECONDS)
+        assertThat(serverSource.readUtf8(6)).isEqualTo("chunk2")
     }
 }
