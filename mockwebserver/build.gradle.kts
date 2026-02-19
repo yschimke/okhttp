@@ -11,6 +11,7 @@ project.applyJavaModules("mockwebserver3")
 
 dependencies {
   "friendsApi"(projects.okhttp)
+  api(projects.mocksocket)
   api(libs.kotlinx.coroutines.core)
   compileOnly(libs.animalsniffer.annotations)
 

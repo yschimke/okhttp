@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package mockwebserver3.socket
+package mockwebserver.socket
 
 import kotlinx.coroutines.delay
 
@@ -44,8 +44,8 @@ public interface Clock {
 
     /** Returns a [Timeout] that uses this clock to track time and deadlines. */
     public fun newTimeout(
-            sharedEvents: MutableList<SocketEvent>? = null,
-            socketName: String? = null
+            eventListener: SocketEventListener,
+            socketName: String
     ): okio.Timeout = okio.Timeout()
 
     public companion object {

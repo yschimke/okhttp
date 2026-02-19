@@ -1,4 +1,4 @@
-package mockwebserver3.socket
+package mockwebserver.socket
 import app.cash.burst.Burst
 import assertk.assertFailure
 import assertk.assertThat

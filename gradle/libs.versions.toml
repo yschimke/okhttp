@@ -63,6 +63,7 @@ square-retrofit = "3.0.0"
 startup-runtime = "1.2.0"
 testcontainers = "1.21.4"
 zstd-kmp-okio = "0.4.0"
+pkts-core = "3.0.3"
 
 # Set to lower version than KGP version to maximize compatibility
 # Default to matching okio
@@ -141,6 +142,7 @@ square-okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem",
 testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
 testcontainers-junit5 = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 square-zstd-kmp-okio = { module = "com.squareup.zstd:zstd-kmp-okio", version.ref = "zstd-kmp-okio" }
+pkts-core = { module = "io.pkts:pkts-core", version.ref = "pkts-core" }
 
 # Build Logic Dependencies
 gradlePlugin-android = { module = "com.android.tools.build:gradle", version.ref = "agp" }

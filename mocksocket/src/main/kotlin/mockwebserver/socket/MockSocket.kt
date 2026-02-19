@@ -1,4 +1,4 @@
-package mockwebserver3.socket
+package mockwebserver.socket
 
 import java.io.IOException
 import java.net.InetAddress
@@ -24,7 +24,7 @@ internal constructor(
         public val clock: Clock,
         private val mutex: Mutex,
         private val profile: NetworkProfile,
-        private val sharedEvents: MutableList<SocketEvent>
+        public val eventListener: SocketEventListener = NoOpSocketEventListener()
 ) {
     private val stateChanged = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     
@@ -38,8 +38,6 @@ internal constructor(
     public var name: String = "Socket"
     public var recordMode: RecordMode = RecordMode.DISABLED
     public var faults: Faults? = null
-    public val events: List<SocketEvent>
-        get() = sharedEvents
 
     public val source: okio.Source
         get() = (asSocket() as okio.Socket).source
@@ -80,10 +78,8 @@ internal constructor(
 
     private suspend fun recordEvent(event: SocketEvent): Unit {
         if (recordMode == RecordMode.DISABLED) return
-        mutex.withLock {
-            sharedEvents.add(event)
-            notifyStateChanged()
-        }
+        eventListener.onEvent(event)
+        notifyStateChanged()
     }
 
     public suspend fun awaitState(predicate: () -> Boolean) {
@@ -104,7 +100,7 @@ internal constructor(
             sink: Buffer,
             byteCount: Long,
             timeout: okio.Timeout =
-                    clock.newTimeout(sharedEvents, name).apply {
+                    clock.newTimeout(eventListener, name).apply {
                         if (soTimeout > 0) timeout(soTimeout.toLong(), TimeUnit.MILLISECONDS)
                     }
     ): Long {
@@ -179,13 +175,25 @@ internal constructor(
 
             if (inputBuffer.size > 0) {
                 val readCount = minOf(byteCount, inputBuffer.size)
+                
+                // Read into intermediate buffer or track specifically so we can duplicate it
+                val startSize = sink.size
                 readResult = inputBuffer.read(sink, readCount)
+                
+                val payloadSize = sink.size - startSize
+                val recordedPayload = if (recordMode == RecordMode.ENABLED && payloadSize > 0) {
+                    val cloneBuffer = Buffer()
+                    sink.copyTo(cloneBuffer, startSize, payloadSize)
+                    cloneBuffer
+                } else null
+
                 recordEvent(
                         SocketEvent.ReadSuccess(
                                 clock.nanoTime(),
                                 Thread.currentThread().name,
                                 name,
-                                readResult!!
+                                readResult!!,
+                                recordedPayload
                         )
                 )
                 notifyStateChanged()
@@ -221,7 +229,7 @@ internal constructor(
             source: Buffer,
             byteCount: Long,
             timeout: okio.Timeout =
-                    clock.newTimeout(sharedEvents, name).apply {
+                    clock.newTimeout(eventListener, name).apply {
                         if (soTimeout > 0) timeout(soTimeout.toLong(), TimeUnit.MILLISECONDS)
                     }
     ): Unit {
@@ -249,13 +257,17 @@ internal constructor(
                     toWrite = minOf(toWrite, maxOf(1, maxAllowedToWrite))
 
                     val p = peer
+                    val recordedPayload = if (recordMode == RecordMode.ENABLED && toWrite > 0) {
+                        val cloneBuffer = Buffer()
+                        source.copyTo(cloneBuffer, 0, toWrite)
+                        cloneBuffer
+                    } else null
+
                     if (p != null) {
                        if (profile.bytesPerSecond > 0) {
                            val delayNanos = (toWrite * 1_000_000_000L) / profile.bytesPerSecond
                            mutex.unlock()
                            try {
-                               // Simulate transmission latency! This guarantees that the caller (sender client) is bound
-                               // to the bandwidth restrictions of the NetworkProfile.
                                clock.await(delayNanos)
                            } finally {
                                mutex.lock()
@@ -280,7 +292,8 @@ internal constructor(
                                     Thread.currentThread().name,
                                     name,
                                     toWrite,
-                                    clock.nanoTime()
+                                    clock.nanoTime(),
+                                    recordedPayload
                             )
                     )
                     remaining -= toWrite
@@ -375,116 +388,97 @@ internal constructor(
                             clock.nanoTime(),
                             Thread.currentThread().name,
                             name,
-                            endpoint.hostName,
+                            endpoint.hostString,
                             endpoint.port
                     )
             )
-
             if (profile.latencyNanos > 0) {
-                clock.await(profile.latencyNanos)
-            }
-
-            mutex.withLock {
-                peer?.let {
-                    it.remoteHostNameInternal = endpoint.hostName
-                    it.remoteAddressInternal = endpoint.address
-                    it.remotePortInternal = endpoint.port
-                    it.isConnected = true
-                    it.notifyStateChanged()
+                val timeout = clock.newTimeout(eventListener, name).apply {
+                    if (soTimeout > 0) timeout(soTimeout.toLong(), TimeUnit.MILLISECONDS)
                 }
-                        ?: run {
-                            this.remoteHostNameInternal = endpoint.hostName
-                            this.remoteAddressInternal = endpoint.address
-                            this.remotePortInternal = endpoint.port
-                            this.isConnected = true
-                        }
-            }
-            onConnect(endpoint.hostName, endpoint.port)
-            notifyStateChanged()
-        }
-    }
-
-    public suspend fun connect(endpoint: SocketAddress, timeoutNanos: Long): Unit {
-        kotlinx.coroutines.coroutineScope {
-            val scope = this
-            val startAndTimeoutDeadline = if (timeoutNanos > 0) clock.nanoTime() + timeoutNanos else Long.MAX_VALUE
-            
-            val connectJob = launch {
-                        connectSuspending(endpoint)
-            }
-            
-            val collection = clock.monitor().produceIn(this)
-            try {
-                while(connectJob.isActive) {
-                    if (startAndTimeoutDeadline != Long.MAX_VALUE) {
-                        val remaining = startAndTimeoutDeadline - clock.nanoTime()
-                        if (remaining <= 0) {
-                            connectJob.cancel()
-                            throw java.net.SocketTimeoutException("connect timed out")
-                        }
-                    }
-                    kotlinx.coroutines.selects.select<Unit> {
-                        collection.onReceive {}
-                        connectJob.onJoin {}
-                    }
+                
+                var waitNanos = profile.latencyNanos
+                if (timeout.hasDeadline()) {
+                    waitNanos = minOf(waitNanos, timeout.deadlineNanoTime() - clock.nanoTime())
                 }
-            } finally {
-                collection.cancel()
+                if (timeout.timeoutNanos() > 0) {
+                    waitNanos = minOf(waitNanos, timeout.timeoutNanos())
+                }
+                
+                if (waitNanos < profile.latencyNanos || waitNanos <= 0) {
+                    if (waitNanos > 0) {
+                       clock.await(waitNanos)
+                    }
+                    throw java.net.SocketTimeoutException("connect timed out")
+                }
             }
+            clock.await(profile.latencyNanos)
         }
+        isConnected = true
     }
 
-    public suspend fun bind(bindpoint: SocketAddress): Unit {
-        mutex.withLock {
-            if (bindpoint is InetSocketAddress) {
-                this@MockSocket.localAddress = bindpoint.address
-                this@MockSocket.localPort = bindpoint.port
-            }
-            notifyStateChanged()
-        }
+    public fun close(): Unit = runBlocking { closeSuspending() }
+
+    public fun connect(endpoint: SocketAddress): Unit = runBlocking { connectSuspending(endpoint) }
+
+    public suspend fun attachClientSuspending(hostName: String, port: Int): MockSocket {
+        peer = MockSocket(clock, mutex, profile, eventListener)
+        peer!!.peer = this
+        this.remoteHostNameInternal = hostName
+        this.remotePortInternal = port
+        this.remoteAddressInternal = InetAddress.getByName(hostName)
+        peer!!.localAddress = this.remoteAddressInternal
+        peer!!.localPort = this.remotePortInternal
+
+        this.onConnect(hostName, port)
+        peer!!.onConnect(null, this.localPort)
+        return peer!!
     }
 
-    public fun asSocket(): JavaNetSocket = MockSocketAdapter(this)
+    public fun asSocket(): JavaNetSocket {
+        return MockSocketAdapter(this)
+    }
 
-    public fun pair(server: MockSocket): Unit {
-        this.peer = server
-        server.peer = this
+    public fun pair(peer: MockSocket): MockSocket {
+        this.peer = peer
+        peer.peer = this
+        return this
     }
 
     public companion object {
         public fun pair(
-                clock: Clock = Clock.SYSTEM,
+                clock: Clock = AutoClock(),
                 profile: NetworkProfile = NetworkProfile(),
-                sharedEvents: MutableList<SocketEvent> = mutableListOf()
+                eventListener: SocketEventListener = MemorySocketEventListener()
         ): Pair<MockSocket, MockSocket> {
             val mutex = Mutex()
-            val socketA = MockSocket(clock, mutex, profile, sharedEvents)
-            val socketB = MockSocket(clock, mutex, profile, sharedEvents)
-            socketA.pair(socketB)
-            socketA.name = "SocketA"
-            socketB.name = "SocketB"
-            return Pair(socketA, socketB)
+            return Pair(
+                    MockSocket(clock, mutex, profile, eventListener).apply { name = "client" },
+                    MockSocket(clock, mutex, profile, eventListener).apply { name = "server" }
+            )
         }
-
-        public fun localhost(clock: Clock = Clock.SYSTEM): Pair<MockSocket, MockSocket> =
-                pair(clock, NetworkProfile.LOCALHOST)
-
-        public fun slowMobile(clock: Clock = Clock.SYSTEM): Pair<MockSocket, MockSocket> =
-                pair(clock, NetworkProfile.SLOW_MOBILE)
     }
 
-    public interface Faults {
-        public fun maybeThrowRead(clock: Clock) {}
+    public suspend fun waitForEvent(predicate: (SocketEvent) -> Boolean): SocketEvent {
+        return kotlinx.coroutines.coroutineScope {
+            val collection =
+                    kotlinx.coroutines.flow.merge(stateChanged, clock.monitor()).produceIn(this)
+            try {
+                while (true) {
+                    var snapshot: List<SocketEvent> = emptyList()
+                    if (eventListener is MemorySocketEventListener) {
+                         snapshot = eventListener.events
+                    }
 
-        public fun maybeThrowWrite(clock: Clock) {}
-    }
-
-    public suspend fun waitForEvent(predicate: (SocketEvent) -> Boolean): Unit {
-        while (true) {
-            val found = mutex.withLock { sharedEvents.any(predicate) }
-            if (found) return
-            yield()
-            delay(10)
+                    val event = snapshot.find(predicate)
+                    if (event != null) {
+                        return@coroutineScope event
+                    }
+                    collection.receive()
+                }
+            } finally {
+                collection.cancel()
+            }
         }
     }
 

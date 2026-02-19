@@ -23,7 +23,7 @@ import mockwebserver3.internal.DEFAULT_REQUEST_LINE_HTTP_1
 import mockwebserver3.internal.MockWebServerSocket
 import mockwebserver3.internal.RecordedRequest
 import mockwebserver3.internal.decodeRequestLine
-import mockwebserver3.socket.MockSocket
+import mockwebserver.socket.MockSocket
 import okhttp3.Headers
 import okhttp3.Headers.Companion.headersOf
 import okio.ByteString

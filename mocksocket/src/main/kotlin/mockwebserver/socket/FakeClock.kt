@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package mockwebserver3.socket
+package mockwebserver.socket
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong

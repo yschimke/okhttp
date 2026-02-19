@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package mockwebserver3.socket
+package mockwebserver.socket
 
 public sealed class SocketEvent {
         public abstract val timestampNanos: Long
@@ -24,7 +24,8 @@ public sealed class SocketEvent {
                 override val timestampNanos: Long,
                 override val threadName: String,
                 override val socketName: String,
-                val byteCount: Long
+                val byteCount: Long,
+                val payload: okio.Buffer? = null
         ) : SocketEvent()
 
         public data class ReadFailed(
@@ -66,7 +67,8 @@ public sealed class SocketEvent {
                 override val threadName: String,
                 override val socketName: String,
                 val byteCount: Long,
-                val arrivalTimeNanos: Long
+                val arrivalTimeNanos: Long,
+                val payload: okio.Buffer? = null
         ) : SocketEvent()
 
         public data class WriteFailed(
@@ -127,6 +129,7 @@ public sealed class SocketEvent {
                 override val threadName: String,
                 override val socketName: String,
                 val byteCount: Long,
-                val arrivalTimeNanos: Long
+                val arrivalTimeNanos: Long,
+                val payload: okio.Buffer? = null
         ) : SocketEvent()
 }
