@@ -161,7 +161,7 @@ public class MockSocketFactory(
         private val profile: NetworkProfile = server.profile
 ) : SocketFactory() {
   override fun createSocket(): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    val (client, server) = MockSocket.pair(clock, profile, MemorySocketEventListener(server.sharedEvents))
     client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)
@@ -170,7 +170,7 @@ public class MockSocketFactory(
   }
 
   override fun createSocket(host: String?, port: Int): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    val (client, server) = MockSocket.pair(clock, profile, MemorySocketEventListener(server.sharedEvents))
     client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)
@@ -188,7 +188,7 @@ public class MockSocketFactory(
           localHost: InetAddress?,
           localPort: Int
   ): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    val (client, server) = MockSocket.pair(clock, profile, MemorySocketEventListener(server.sharedEvents))
     client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)
@@ -204,7 +204,7 @@ public class MockSocketFactory(
   }
 
   override fun createSocket(address: InetAddress?, port: Int): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    val (client, server) = MockSocket.pair(clock, profile, MemorySocketEventListener(server.sharedEvents))
     client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)
@@ -222,7 +222,7 @@ public class MockSocketFactory(
           localAddress: InetAddress?,
           localPort: Int
   ): JavaNetSocket {
-    val (client, server) = MockSocket.pair(clock, profile, server.sharedEvents)
+    val (client, server) = MockSocket.pair(clock, profile, MemorySocketEventListener(server.sharedEvents))
     client.onConnect = { _, _ ->
       client.pair(server)
       this.server.enqueue(server)

@@ -413,13 +413,25 @@ internal constructor(
                 }
             }
             clock.await(profile.latencyNanos)
+            isConnected = true
+            onConnect(endpoint.hostString, endpoint.port)
         }
-        isConnected = true
     }
 
     public fun close(): Unit = runBlocking { closeSuspending() }
 
     public fun connect(endpoint: SocketAddress): Unit = runBlocking { connectSuspending(endpoint) }
+
+    public fun bind(bindpoint: SocketAddress?): Unit {
+        if (bindpoint is InetSocketAddress) {
+            this.localAddress = bindpoint.address
+            this.localPort = bindpoint.port
+        }
+    }
+
+    public fun connect(endpoint: SocketAddress, timeoutNanos: Long): Unit = runBlocking {
+        connectSuspending(endpoint)
+    }
 
     public suspend fun attachClientSuspending(hostName: String, port: Int): MockSocket {
         peer = MockSocket(clock, mutex, profile, eventListener)
@@ -479,7 +491,12 @@ internal constructor(
             } finally {
                 collection.cancel()
             }
+            throw java.io.IOException("Event not found")
         }
+    }
+
+    public interface Faults {
+        public fun maybeThrowRead(clock: Clock)
     }
 
     public suspend fun waitForReadWait(): Unit {

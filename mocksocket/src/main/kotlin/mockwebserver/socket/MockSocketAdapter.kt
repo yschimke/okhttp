@@ -144,7 +144,7 @@ internal class MockSocketAdapter(private val mockSocket: MockSocket) : JavaNetSo
               mockSocket.readSuspending(sink, byteCount, timeout())
             }
             override fun timeout(): Timeout =
-                    mockSocket.clock.newTimeout().apply {
+                    mockSocket.clock.newTimeout(mockSocket.eventListener, mockSocket.name).apply {
                       if (mockSocket.soTimeout > 0)
                               timeout(mockSocket.soTimeout.toLong(), TimeUnit.MILLISECONDS)
                     }
@@ -158,7 +158,7 @@ internal class MockSocketAdapter(private val mockSocket: MockSocket) : JavaNetSo
             }
             override fun flush(): Unit {}
             override fun timeout(): Timeout =
-                    mockSocket.clock.newTimeout().apply {
+                    mockSocket.clock.newTimeout(mockSocket.eventListener, mockSocket.name).apply {
                       if (mockSocket.soTimeout > 0)
                               timeout(mockSocket.soTimeout.toLong(), TimeUnit.MILLISECONDS)
                     }

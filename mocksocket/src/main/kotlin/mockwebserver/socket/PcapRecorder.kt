@@ -14,7 +14,7 @@ import java.io.Closeable
 
 public class PcapRecorder(file: File) : SocketEventListener, Closeable {
 
-    private val out = PcapOutputStream.create(FileOutputStream(file))
+    private val out = io.pkts.PcapOutputStream.create(io.pkts.frame.PcapGlobalHeader.createDefaultHeader(), FileOutputStream(file))
     
     // Track synthetic sequence numbers per socket to map TCP window flow
     private val sequenceNumbers = mutableMapOf<String, Long>()
@@ -141,7 +141,9 @@ public class PcapRecorder(file: File) : SocketEventListener, Closeable {
         val timeSec = timestampUsec / 1_000_000
         val timeUsecRem = timestampUsec % 1_000_000
         
-        val frame = io.pkts.packet.PCapPacket.createPCapPacket(io.pkts.protocol.Protocol.ETHERNET, timeSec, timeUsecRem, rawPkt.size, rawPkt)
+        val recordHeader = io.pkts.frame.PcapRecordHeader.createDefaultHeader(timestampUsec)
+        val globalHeader = io.pkts.frame.PcapGlobalHeader.createDefaultHeader()
+        val frame = io.pkts.packet.impl.PCapPacketImpl(globalHeader, recordHeader, io.pkts.buffer.Buffers.wrap(rawPkt))
         out.write(frame)
     }
 }

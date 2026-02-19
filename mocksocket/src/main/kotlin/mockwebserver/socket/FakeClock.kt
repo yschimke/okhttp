@@ -69,9 +69,9 @@ public open class FakeClock : Clock {
     override fun monitor(): kotlinx.coroutines.flow.Flow<Unit> = timeChanged
 
     override fun newTimeout(
-            sharedEvents: MutableList<SocketEvent>?,
-            socketName: String?
-    ): okio.Timeout = FakeTimeout(this, sharedEvents, socketName)
+            eventListener: SocketEventListener,
+            socketName: String
+    ): okio.Timeout = FakeTimeout(this, eventListener, socketName)
 }
 
 /** Suspending API to monitor actions on a [FakeClock]. */

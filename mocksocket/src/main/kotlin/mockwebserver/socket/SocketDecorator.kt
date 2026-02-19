@@ -25,7 +25,7 @@ public class SocketDecorator(
 ) : Socket() {
 
     private val mySource: Source = object : Source {
-        private val delegateSource = delegate.source()
+        private val delegateSource by lazy { delegate.source() }
 
         override fun read(sink: Buffer, byteCount: Long): Long {
             val startSize = sink.size
@@ -62,7 +62,7 @@ public class SocketDecorator(
     }
 
     private val mySink: Sink = object : Sink {
-        private val delegateSink = delegate.sink()
+        private val delegateSink by lazy { delegate.sink() }
 
         override fun write(source: Buffer, byteCount: Long) {
             val payload = if (byteCount > 0) {
@@ -121,7 +121,7 @@ public class SocketDecorator(
     override fun getLocalPort(): Int = delegate.localPort
     override fun getRemoteSocketAddress(): SocketAddress? = delegate.remoteSocketAddress
     override fun getLocalSocketAddress(): SocketAddress? = delegate.localSocketAddress
-    override fun getChannel() = delegate.channel
+    override fun getChannel(): java.nio.channels.SocketChannel? = delegate.channel
     override fun getInputStream(): InputStream = myInputStream
     override fun getOutputStream(): OutputStream = myOutputStream
     

@@ -42,7 +42,7 @@ class DnsOverHttpsCaptureTest {
 
     @AfterEach
     fun tearDown() {
-        server.shutdown()
+        server.close()
         netLogRecorder.close()
         pcapRecorder.close()
     }
@@ -92,7 +92,7 @@ class DnsOverHttpsCaptureTest {
 
         return DnsOverHttps.Builder()
             .client(bootstrapClient)
-            .url(server.url("/"))
+            .url(server.url("/lookup?ct"))
             .build()
     }
 

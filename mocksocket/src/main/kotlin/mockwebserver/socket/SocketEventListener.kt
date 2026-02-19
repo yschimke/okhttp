@@ -8,8 +8,9 @@ public class NoOpSocketEventListener : SocketEventListener {
     override fun onEvent(event: SocketEvent) {}
 }
 
-public class MemorySocketEventListener : SocketEventListener {
-    private val _events = mutableListOf<SocketEvent>()
+public class MemorySocketEventListener(
+    private val _events: MutableList<SocketEvent> = mutableListOf()
+) : SocketEventListener {
     public val events: List<SocketEvent>
         get() = _events.toList()
 

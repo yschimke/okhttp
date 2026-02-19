@@ -21,8 +21,8 @@ import okio.Timeout
 /** A timeout that uses the [Clock] to check deadlines and records events. */
 public class FakeTimeout(
         private val clock: Clock,
-        private val sharedEvents: MutableList<SocketEvent>? = null,
-        private val socketName: String? = null
+        private val eventListener: SocketEventListener,
+        private val socketName: String
 ) : Timeout() {
     private var startTimeNanos: Long = -1L
 
@@ -51,18 +51,14 @@ public class FakeTimeout(
             if (now >= deadline - 1_000_000L) {
                 val message = "deadline reached (now=$now, deadline=$deadline)"
 
-                sharedEvents?.let { events ->
-                    synchronized(events) {
-                        events.add(
-                                SocketEvent.TimeoutReached(
-                                        timestampNanos = now,
-                                        threadName = Thread.currentThread().name,
-                                        socketName = socketName ?: "unknown",
-                                        message = message
-                                )
+                eventListener.onEvent(
+                        SocketEvent.TimeoutReached(
+                                timestampNanos = now,
+                                threadName = Thread.currentThread().name,
+                                socketName = socketName,
+                                message = message
                         )
-                    }
-                }
+                )
 
                 throw InterruptedIOException(message)
             }

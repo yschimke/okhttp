@@ -32,12 +32,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
-import mockwebserver3.socket.AutoClock
-import mockwebserver3.socket.MockServerSocket
-import mockwebserver3.socket.MockSocketFactory
-import mockwebserver3.socket.NetworkProfile
-import mockwebserver3.socket.SocketMode
-import mockwebserver3.socket.asServerSocketFactory
+import mockwebserver.socket.AutoClock
+import mockwebserver.socket.MockServerSocket
+import mockwebserver.socket.MockSocketFactory
+import mockwebserver.socket.NetworkProfile
+import mockwebserver.socket.SocketMode
+import mockwebserver.socket.asServerSocketFactory
 import okhttp3.Cache
 import okhttp3.CallEvent
 import okhttp3.CallEvent.CacheHit
@@ -350,12 +350,6 @@ class DnsOverHttpsTest(
                         eventRecorder.clearAllEvents()
                 }
 
-        private fun dnsResponse(s: String): MockResponse =
-                MockResponse.Builder()
-                        .body(Buffer().write(s.decodeHex()))
-                        .addHeader("content-type", "application/dns-message")
-                        .addHeader("content-length", s.length / 2)
-                        .build()
 
         private fun buildLocalhost(
                 bootstrapClient: OkHttpClient,
@@ -373,6 +367,13 @@ class DnsOverHttpsTest(
         }
 
         companion object {
-                private fun address(host: String) = InetAddress.getByName(host)
+                internal fun address(host: String) = InetAddress.getByName(host)
+
+                internal fun dnsResponse(s: String): MockResponse =
+                        MockResponse.Builder()
+                                .body(Buffer().write(s.decodeHex()))
+                                .addHeader("content-type", "application/dns-message")
+                                .addHeader("content-length", s.length / 2)
+                                .build()
         }
 }
