@@ -14,14 +14,18 @@ import java.io.Closeable
 
 public class PcapRecorder(file: File) : SocketEventListener, Closeable {
 
-    private val out = io.pkts.PcapOutputStream.create(io.pkts.frame.PcapGlobalHeader.createDefaultHeader(), FileOutputStream(file))
+    private val globalHeader = io.pkts.frame.PcapGlobalHeader.createDefaultHeader()
+    private val out = io.pkts.PcapOutputStream.create(globalHeader, FileOutputStream(file))
+    private var closed = false
     
     // Track synthetic sequence numbers per socket to map TCP window flow
     private val sequenceNumbers = mutableMapOf<String, Long>()
     private val ackNumbers = mutableMapOf<String, Long>()
 
     override fun onEvent(event: SocketEvent) {
-        val timeUsec = event.timestampNanos / 1000
+        synchronized(this) {
+            if (closed) return
+            val timeUsec = event.timestampNanos / 1000
 
         // In a true pcap we need synthetic IPs and Ports. MockSocket captures these as Strings/Ints.
         val srcIp = "127.0.0.1"
@@ -60,10 +64,15 @@ public class PcapRecorder(file: File) : SocketEventListener, Closeable {
 
         sequenceNumbers[event.socketName] = seq
         ackNumbers[event.socketName] = ack
+        }
     }
 
     override fun close() {
-        out.close()
+        synchronized(this) {
+            if (closed) return
+            closed = true
+            out.close()
+        }
     }
 
     private fun writePacket(
@@ -142,7 +151,8 @@ public class PcapRecorder(file: File) : SocketEventListener, Closeable {
         val timeUsecRem = timestampUsec % 1_000_000
         
         val recordHeader = io.pkts.frame.PcapRecordHeader.createDefaultHeader(timestampUsec)
-        val globalHeader = io.pkts.frame.PcapGlobalHeader.createDefaultHeader()
+        recordHeader.capturedLength = rawPkt.size.toLong()
+        recordHeader.totalLength = rawPkt.size.toLong()
         val frame = io.pkts.packet.impl.PCapPacketImpl(globalHeader, recordHeader, io.pkts.buffer.Buffers.wrap(rawPkt))
         out.write(frame)
     }

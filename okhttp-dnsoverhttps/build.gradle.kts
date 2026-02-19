@@ -23,6 +23,7 @@ dependencies {
   testImplementation(projects.mocksocket)
   testImplementation(libs.square.okio.fakefilesystem)
   testImplementation(libs.conscrypt.openjdk)
+  testImplementation(libs.pkts.core)
   testImplementation(libs.junit)
   testImplementation(libs.kotlin.test.common)
   testImplementation(libs.kotlin.test.junit)

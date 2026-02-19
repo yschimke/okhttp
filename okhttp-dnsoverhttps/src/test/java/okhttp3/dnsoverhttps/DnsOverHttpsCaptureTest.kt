@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.assertTrue
+import io.pkts.Pcap
 
 class DnsOverHttpsCaptureTest {
     private val server = MockWebServer()
@@ -105,17 +106,26 @@ class DnsOverHttpsCaptureTest {
                         "0003b00049df00112",
             ),
         )
+        server.enqueue(
+            DnsOverHttpsTest.dnsResponse(
+                "0000818000010003000000000567726170680866616365626f6f6b03636f6d00001c0001c00c000500010" +
+                        "0000a6d000603617069c012c0300005000100000cde000c04737461720463313072c012c04200010001000" +
+                        "0003b00049df00112",
+            ),
+        )
 
         val dns = buildLocalhost()
         val result = dns.lookup("google.com")
         
-        // Assert identical to okhttp3 original test
-        assertThat(result).isEqualTo(listOf(InetAddress.getByName("157.240.1.18")))
+        // Assert identical to okhttp3 original test, but now with both A and AAAA results
+        assertThat(result).isEqualTo(listOf(InetAddress.getByName("157.240.1.18"), InetAddress.getByName("157.240.1.18")))
         
-        val recordedRequest = server.takeRequest()
-        assertThat(recordedRequest.method).isEqualTo("GET")
-        assertThat(recordedRequest.url.encodedQuery)
-            .isEqualTo("ct&dns=AAABAAABAAAAAAAABmdvb2dsZQNjb20AAAEAAQ")
+        val recordedRequest1 = server.takeRequest()
+        val recordedRequest2 = server.takeRequest()
+        
+        val queries = setOf(recordedRequest1.url.encodedQuery, recordedRequest2.url.encodedQuery)
+        assertTrue(queries.contains("ct&dns=AAABAAABAAAAAAAABmdvb2dsZQNjb20AAAEAAQ"))
+        assertTrue(queries.contains("ct&dns=AAABAAABAAAAAAAABmdvb2dsZQNjb20AABwAAQ"))
 
         netLogRecorder.close()
         pcapRecorder.close()
@@ -124,7 +134,21 @@ class DnsOverHttpsCaptureTest {
         assertTrue(fileNetLog.exists())
         assertTrue(fileNetLog.length() > 100)
         
+        // Basic NetLog validity check
+        val netLogContent = fileNetLog.readText().trim()
+        assertTrue(netLogContent.startsWith("{"))
+        assertTrue(netLogContent.endsWith("}"))
+        
         assertTrue(filePcap.exists())
         assertTrue(filePcap.length() > 100)
+
+        // Load and verify PCAP
+        val pcap = Pcap.openStream(filePcap)
+        var packetCount = 0
+        pcap.loop {
+            packetCount++
+            true
+        }
+        assertTrue(packetCount > 0)
     }
 }

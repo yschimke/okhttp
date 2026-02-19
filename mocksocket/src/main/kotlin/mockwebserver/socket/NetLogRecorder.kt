@@ -8,6 +8,7 @@ import java.io.Closeable
 public class NetLogRecorder(file: File) : SocketEventListener, Closeable {
     private val writer = file.printWriter()
     private var isFirstEvent = true
+    private var closed = false
 
     init {
         writer.println("{")
@@ -82,6 +83,8 @@ public class NetLogRecorder(file: File) : SocketEventListener, Closeable {
     }
 
     override fun close() {
+        if (closed) return
+        closed = true
         if (!isFirstEvent) writer.println()
         writer.println("  ]")
         writer.println("}")
