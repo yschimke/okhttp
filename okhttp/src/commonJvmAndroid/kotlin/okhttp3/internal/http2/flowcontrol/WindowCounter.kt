@@ -19,13 +19,15 @@ class WindowCounter(
   val streamId: Int,
 ) {
   /** The total number of bytes consumed. */
+  @Volatile
   var total: Long = 0L
     private set
 
   /** The total number of bytes acknowledged by outgoing `WINDOW_UPDATE` frames. */
+  @Volatile
   var acknowledged: Long = 0L
     private set
-
+  
   val unacknowledged: Long
     @Synchronized get() = total - acknowledged
 
