@@ -14,12 +14,6 @@
  * limitations under the License.
  */
 
-@file:Suppress(
-  "CANNOT_OVERRIDE_INVISIBLE_MEMBER",
-  "INVISIBLE_MEMBER",
-  "INVISIBLE_REFERENCE",
-)
-
 package okhttp3.internal.concurrent
 
 import assertk.assertThat
