@@ -330,9 +330,9 @@ jobs:
           :regression-test:assembleDebugAndroidTest
 
       - name: Configure emulator.wtf credentials
-        uses: emulator-wtf/configure-credentials@v1
+        uses: emulator-wtf/configure-credentials@d0d840f8d9e2920e284788fcfa32f0a1eed95bf0 # v1
         with:
-          oidc-configuration-id: # TODO: add OIDC configuration ID from emulator.wtf
+          oidc-configuration-id: 040a3b44-04c6-4ddc-a434-2c59cd0fb2ca
 
       - name: Run android-test instrumented tests
         uses: emulator-wtf/run-tests@v0
