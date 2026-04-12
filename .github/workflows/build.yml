@@ -337,7 +337,7 @@ jobs:
       - name: Run android-test instrumented tests
         uses: emulator-wtf/run-tests@v0
         with:
-          test: android-test/build/outputs/apk/androidTest/debug/android-test-debug-androidTest.apk
+          library-test: android-test/build/outputs/apk/androidTest/debug/android-test-debug-androidTest.apk
           devices: version=${{ matrix.api-level }}
           outputs-dir: build/test-results/android-test
 
@@ -352,7 +352,7 @@ jobs:
       - name: Run regression-test instrumented tests
         uses: emulator-wtf/run-tests@v0
         with:
-          test: regression-test/build/outputs/apk/androidTest/debug/regression-test-debug-androidTest.apk
+          library-test: regression-test/build/outputs/apk/androidTest/debug/regression-test-debug-androidTest.apk
           devices: version=${{ matrix.api-level }}
           outputs-dir: build/test-results/regression-test
 
