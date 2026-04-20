@@ -1,5 +1,6 @@
 [versions]
 agp = "9.1.1"
+dnsjava = "3.6.4"
 amazon-corretto = "2.5.0"
 android-junit5 = "2.0.1"
 androidx-activity = "1.11.0"
@@ -90,6 +91,7 @@ conscrypt-android = { module = "org.conscrypt:conscrypt-android", version.ref = 
 conscrypt-openjdk = { module = "org.conscrypt:conscrypt-openjdk-uber", version.ref = "org-conscrypt" }
 square-retrofit-converter-moshi = { module = "com.squareup.retrofit2:converter-moshi", version.ref = "square-retrofit" }
 eclipse-osgi = { module = "org.eclipse.platform:org.eclipse.osgi", version.ref = "eclipse-osgi" }
+dnsjava = { module = "dnsjava:dnsjava", version.ref = "dnsjava" }
 hamcrest-library = { module = "org.hamcrest:hamcrest-library", version.ref = "hamcrest-library" }
 guava-jre = { module = "com.google.guava:guava", version.ref = "guava" }
 http-client5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "http-client5" }

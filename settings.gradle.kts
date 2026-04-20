@@ -11,6 +11,11 @@ pluginManagement {
 
 rootProject.name = "okhttp-parent"
 
+// The quiche4j transport for okhttp-quiche4j is consumed from a sibling
+// working copy. Once the module lives on Maven Central this becomes a
+// normal `implementation(libs.quiche4j.core)` in okhttp-quiche4j.
+includeBuild("../quiche4j-yschimke")
+
 dependencyResolutionManagement {
   repositories {
     mavenCentral()
@@ -54,6 +59,7 @@ include(":okhttp-idna-mapping-table")
 include(":okhttp-java-net-cookiejar")
 include(":okhttp-logging-interceptor")
 include(":okhttp-osgi-tests")
+include(":okhttp-quiche4j")
 include(":okhttp-sse")
 include(":okhttp-testing-support")
 include(":okhttp-tls")

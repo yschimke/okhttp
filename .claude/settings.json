@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :okhttp-quiche4j:* *)",
+      "Bash(cd /home/yuri/workspace/quiche4j-yschimke && ./gradlew *)",
+      "Bash(./gradlew :quiche4j-* *)",
+      "Bash(./gradlew projects)",
+      "Bash(./gradlew projects *)",
+      "Bash(./gradlew tasks *)",
+      "Bash(./gradlew help *)",
+      "Bash(./gradlew --version)",
+      "Bash(tee /tmp/*.log)",
+      "Bash(pacman -Q *)",
+      "Bash(mvn -v)",
+      "Bash(mvn --version)",
+      "Bash(rustup target list *)"
+    ]
+  }
+}
