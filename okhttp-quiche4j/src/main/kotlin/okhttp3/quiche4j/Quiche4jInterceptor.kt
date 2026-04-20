@@ -17,7 +17,7 @@ import okhttp3.internal.http.RealInterceptorChain
 
 /**
  * An OkHttp application interceptor that short-circuits the normal HTTP/1.x/2 stack and performs
- * the fetch over HTTP/3 (QUIC) using [quiche4j](https://github.com/yschimke/quiche4j).
+ * the fetch over HTTP/3 (QUIC) using [quiche4j][io.quiche4j].
  *
  * This mirrors the `cronet-transport-for-okhttp` design: add it as the **last application
  * interceptor**, and every request that reaches it is handled by the QUIC engine. The response is
@@ -27,6 +27,12 @@ import okhttp3.internal.http.RealInterceptorChain
  * [BridgeInterceptor] (host/user-agent/cookies) and [CacheInterceptor] so cache reads/writes
  * still happen exactly as they would for a normal OkHttp call. Only the final "call the network"
  * step is replaced with the quiche4j-backed [Quiche4jCallServer].
+ *
+ * TLS trust and hostname verification follow the `OkHttpClient`'s configured
+ * [X509TrustManager][javax.net.ssl.X509TrustManager] (defaults to the platform trust manager)
+ * and [HostnameVerifier][javax.net.ssl.HostnameVerifier] (defaults to
+ * [okhttp3.internal.tls.OkHostnameVerifier]). All verification runs in Java after the QUIC
+ * handshake; quiche's BoringSSL verification is disabled.
  *
  * See `PLAN.md` in this module for the full three-stage roadmap.
  */
@@ -59,19 +65,12 @@ class Quiche4jInterceptor private constructor(
     //      already happened as part of the regular A/AAAA query.
     //   2. The explicit resolver passed on the Builder. Used by callers who don't want to swap
     //      their Dns wholesale.
-    // If either source returns a record that doesn't advertise "h3", fall through to OkHttp's
-    // normal stack. If the lookup fails or returns no records, we also fall through — absence
-    // of a record doesn't mean "no H/3", but neither does it tell us anything useful, so the
-    // safe default is to not interfere when discovery was explicitly requested.
     val hostname = outerRequest.url.host
     val dns = realChain.dns
     val discoveryEnabled = dns is HttpsAware || httpsRecordResolver != null
     val record: HttpsServiceRecord? =
       when {
         dns is HttpsAware -> {
-          // Trigger the (parallel) A/AAAA + HTTPS lookup on the shared Dns so the cache is
-          // populated by the time we query it. If we end up falling through, OkHttp's core will
-          // hit the same Dns and reuse whatever caching the underlying system provides.
           try {
             dns.lookup(hostname)
           } catch (_: Throwable) {
@@ -87,6 +86,7 @@ class Quiche4jInterceptor private constructor(
           }
         else -> null
       }
+
     // Decision: prefer HTTP/3 when any of the following is true:
     //   (a) the request carries Http3Preference.Force — bypass all discovery
     //   (b) discovery is disabled (no HTTPS-record resolver, no HttpsAware Dns, no cached
@@ -156,42 +156,8 @@ class Quiche4jInterceptor private constructor(
   }
 
   class Builder {
-    private var userAgent: String = "okhttp-quiche4j"
-    private var trustedCaPemFile: String? = null
-    private var trustedCaDirectory: String? = null
-    private var allowInsecure: Boolean = false
     private var httpsRecordResolver: HttpsServiceRecordResolver? = null
     private var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
-
-    // QUIC handshake timeout -> OkHttpClient.Builder.connectTimeout(...).
-    // QUIC max_idle_timeout  -> OkHttpClient.Builder.readTimeout(...). Closest analog; both
-    // fire when we've gone "too long" without progress, even though QUIC's notion is slightly
-    // broader (acks count, not just application bytes).
-
-    /** User-Agent header used by BridgeInterceptor-style defaults. */
-    fun userAgent(value: String) = apply { this.userAgent = value }
-
-    /**
-     * PEM file containing the trusted CA certificates for peer verification.
-     *
-     * Overrides automatic platform detection. Mutually exclusive with
-     * [trustedCaDirectory].
-     */
-    fun trustedCaPemFile(path: String?) = apply { this.trustedCaPemFile = path }
-
-    /**
-     * Directory of trusted CA certificates in OpenSSL hashed layout
-     * (e.g. `/etc/ssl/certs`) for peer verification.
-     *
-     * Overrides automatic platform detection. Mutually exclusive with
-     * [trustedCaPemFile].
-     */
-    fun trustedCaDirectory(path: String?) = apply { this.trustedCaDirectory = path }
-
-    /**
-     * Disable peer verification entirely. Development use only — never enable in production.
-     */
-    fun allowInsecure(value: Boolean) = apply { this.allowInsecure = value }
 
     /**
      * Optional HTTPS DNS record (RFC 9460) resolver. If set, the interceptor looks up the
@@ -199,8 +165,6 @@ class Quiche4jInterceptor private constructor(
      * ALPN list, or if the lookup fails, the interceptor calls `chain.proceed()` and lets
      * OkHttp's standard H/1.1/H/2 stack handle the request. If unset (default), every HTTPS
      * request reaching this interceptor is attempted over HTTP/3.
-     *
-     * Pass [HttpsServiceRecordResolver.DEFAULT] to use the dnsjava-backed implementation.
      */
     fun httpsServiceRecordResolver(resolver: HttpsServiceRecordResolver?) =
       apply { this.httpsRecordResolver = resolver }
@@ -212,15 +176,6 @@ class Quiche4jInterceptor private constructor(
      */
     fun altSvcCache(cache: AltSvcCache) = apply { this.altSvcCache = cache }
 
-    fun build(): Quiche4jInterceptor {
-      val engine =
-        Quiche4jEngine(
-          trustedCaPemFile = trustedCaPemFile,
-          trustedCaDirectory = trustedCaDirectory,
-          allowInsecure = allowInsecure,
-          userAgent = userAgent,
-        )
-      return Quiche4jInterceptor(engine, httpsRecordResolver, altSvcCache)
-    }
+    fun build(): Quiche4jInterceptor = Quiche4jInterceptor(Quiche4jEngine(), httpsRecordResolver, altSvcCache)
   }
 }

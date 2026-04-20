@@ -15,15 +15,21 @@ import io.quiche4j.http3.Http3ConfigBuilder
 import io.quiche4j.http3.Http3Connection
 import io.quiche4j.http3.Http3EventListener
 import io.quiche4j.http3.Http3Header
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.SSLPeerUnverifiedException
+import javax.net.ssl.X509TrustManager
 import okhttp3.Handshake
 import okhttp3.TlsVersion
 
@@ -286,6 +292,8 @@ internal class QuicPooledConnection private constructor(
       key: PoolKey,
       peer: InetSocketAddress,
       engine: Quiche4jEngine,
+      trustManager: X509TrustManager,
+      hostnameVerifier: HostnameVerifier,
       handshakeTimeoutMillis: Long,
       maxIdleTimeoutMillis: Long,
     ): QuicPooledConnection {
@@ -307,9 +315,13 @@ internal class QuicPooledConnection private constructor(
 
       try {
         pumpHandshake(quicConn, socket, peer, handshakeTimeoutMillis)
+        // quiche's verify_peer is off by design; we run the equivalent of
+        // X509ExtendedTrustManager + HostnameVerifier ourselves against the peer cert chain.
+        // Any failure throws SSLPeerUnverifiedException before we expose the connection.
+        val peerCerts = verifyPeer(quicConn, key.host, trustManager, hostnameVerifier)
         val h3Config = Http3ConfigBuilder().build()
         val h3 = Http3Connection.withTransport(quicConn, h3Config)
-        val handshake = buildHandshake(quicConn)
+        val handshake = buildHandshake(peerCerts)
         val conn =
           QuicPooledConnection(
             key = key,
@@ -381,25 +393,110 @@ internal class QuicPooledConnection private constructor(
       }
     }
 
-    private fun buildHandshake(conn: Connection): Handshake {
-      val peerCerts: List<java.security.cert.Certificate> =
-        try {
-          val chain = conn.peerCertificateChain()
-          if (chain.isNullOrEmpty()) {
-            emptyList()
-          } else {
-            val cf = java.security.cert.CertificateFactory.getInstance("X.509")
-            chain.map { der -> cf.generateCertificate(java.io.ByteArrayInputStream(der)) }
-          }
-        } catch (_: Throwable) {
-          emptyList()
+    private fun verifyPeer(
+      conn: Connection,
+      host: String,
+      trustManager: X509TrustManager,
+      hostnameVerifier: HostnameVerifier,
+    ): List<X509Certificate> {
+      val chain: Array<out ByteArray> =
+        conn.peerCertificateChain()
+          ?: throw SSLPeerUnverifiedException("peer presented no certificate chain")
+      if (chain.isEmpty()) {
+        throw SSLPeerUnverifiedException("peer presented an empty certificate chain")
+      }
+      val cf = CertificateFactory.getInstance("X.509")
+      val certs =
+        chain.map { der ->
+          cf.generateCertificate(ByteArrayInputStream(der)) as X509Certificate
         }
-      return Handshake.get(
+      // authType "UNKNOWN" because quiche doesn't currently surface the TLS 1.3 key exchange.
+      // Most trust managers only inspect the chain; those that care about authType (Android's,
+      // for example) fall back to generic PKIX validation.
+      trustManager.checkServerTrusted(certs.toTypedArray(), "UNKNOWN")
+
+      // For the OkHttp-native hostname path we'd call hostnameVerifier.verify(host, sslSession),
+      // but we have no SSLSession here. Prefer OkHostnameVerifier's cert-based path when we see
+      // it; otherwise synthesize a minimal SSLSession-like wrapper.
+      val leaf = certs.first()
+      val verified =
+        if (hostnameVerifier === okhttp3.internal.tls.OkHostnameVerifier) {
+          okhttp3.internal.tls.OkHostnameVerifier.verify(host, leaf)
+        } else {
+          hostnameVerifier.verify(host, SyntheticPeerSession(certs))
+        }
+      if (!verified) {
+        throw SSLPeerUnverifiedException(
+          "hostname '$host' not verified by leaf cert ${leaf.subjectX500Principal}",
+        )
+      }
+      return certs
+    }
+
+    private fun buildHandshake(peerCerts: List<X509Certificate>): Handshake =
+      Handshake.get(
         tlsVersion = TlsVersion.TLS_1_3,
         cipherSuite = okhttp3.CipherSuite.TLS_AES_128_GCM_SHA256,
         peerCertificates = peerCerts,
         localCertificates = emptyList(),
       )
-    }
   }
+}
+
+/**
+ * Minimal [javax.net.ssl.SSLSession] used only so we can call a user-supplied generic
+ * [HostnameVerifier].verify(host, session) when it isn't OkHttp's own [OkHostnameVerifier].
+ * Only [peerCertificates] is meaningful; every other method returns a safe no-op so verifiers
+ * that touch only the cert chain (the typical case) work correctly. If a verifier reaches for
+ * cipher-suite or session-id details we don't have, they get dummy values.
+ */
+private class SyntheticPeerSession(
+  private val peerCerts: List<X509Certificate>,
+) : javax.net.ssl.SSLSession {
+  override fun getPeerCertificates(): Array<java.security.cert.Certificate> =
+    peerCerts.toTypedArray()
+
+  override fun getPeerCertificateChain(): Array<javax.security.cert.X509Certificate> =
+    emptyArray()
+
+  override fun getPeerPrincipal(): java.security.Principal = peerCerts.first().subjectX500Principal
+
+  override fun getPeerHost(): String = ""
+
+  override fun getPeerPort(): Int = -1
+
+  override fun getId(): ByteArray = ByteArray(0)
+
+  override fun getSessionContext(): javax.net.ssl.SSLSessionContext? = null
+
+  override fun getCreationTime(): Long = 0
+
+  override fun getLastAccessedTime(): Long = 0
+
+  override fun invalidate() {}
+
+  override fun isValid(): Boolean = true
+
+  override fun putValue(
+    name: String,
+    value: Any,
+  ) {}
+
+  override fun getValue(name: String): Any? = null
+
+  override fun removeValue(name: String) {}
+
+  override fun getValueNames(): Array<String> = emptyArray()
+
+  override fun getLocalCertificates(): Array<java.security.cert.Certificate> = emptyArray()
+
+  override fun getCipherSuite(): String = "UNKNOWN"
+
+  override fun getProtocol(): String = "TLSv1.3"
+
+  override fun getPacketBufferSize(): Int = 0
+
+  override fun getApplicationBufferSize(): Int = 0
+
+  override fun getLocalPrincipal(): java.security.Principal? = null
 }

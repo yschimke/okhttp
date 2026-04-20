@@ -29,14 +29,12 @@ class Quiche4jInterceptorTest {
     val interceptor =
       Quiche4jInterceptor
         .Builder()
-        .userAgent("test/1.0")
-        .allowInsecure(true)
         .build()
     assertThat(interceptor).isNotNull()
   }
 
   @Test fun `client accepts the interceptor`() {
-    val interceptor = Quiche4jInterceptor.Builder().allowInsecure(true).build()
+    val interceptor = Quiche4jInterceptor.Builder().build()
     val client =
       OkHttpClient
         .Builder()
@@ -45,14 +43,7 @@ class Quiche4jInterceptorTest {
     assertThat(client.interceptors.size).isEqualTo(1)
   }
 
-  /**
-   * End-to-end test against a public HTTP/3 endpoint. Disabled by default because:
-   *   * it requires network, and
-   *   * quiche4j does not yet expose a way to load the system CA trust store, so the test only
-   *     works with `allowInsecure(true)` or a hand-rolled PEM.
-   *
-   * See [PLAN.md][../../../../../../PLAN.md] — tracked as a quiche4j upstream task.
-   */
+  /** End-to-end test against a public HTTP/3 endpoint. Uses the JVM's platform trust store. */
   @Test fun `two sequential fetches reuse the pooled connection`() {
     val interceptor = Quiche4jInterceptor.Builder().build()
     val client =

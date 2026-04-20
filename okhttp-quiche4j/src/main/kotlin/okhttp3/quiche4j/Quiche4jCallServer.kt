@@ -13,6 +13,7 @@ import io.quiche4j.http3.Http3Header
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
+import javax.net.ssl.X509TrustManager
 import okhttp3.Headers
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -21,6 +22,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.asResponseBody
 import okhttp3.internal.http.RealInterceptorChain
+import okhttp3.internal.platform.Platform
 import okio.Buffer
 import okio.buffer
 
@@ -50,8 +52,6 @@ internal class Quiche4jCallServer(
     val addresses = realChain.dns.lookup(url.host)
     eventListener.dnsEnd(call, url.host, addresses)
     if (addresses.isEmpty()) throw IOException("No addresses for ${url.host}")
-    // Honor Http3Preference.Force.portOverride if the caller attached one. Falls back to the
-    // URL's port (which remains the :authority the origin sees — we only redirect UDP datagrams).
     val peerPort =
       (Http3Preference.of(request) as? Http3Preference.Force)?.portOverride ?: url.port
     val peer = InetSocketAddress(addresses.first(), peerPort)
@@ -61,12 +61,21 @@ internal class Quiche4jCallServer(
     eventListener.connectStart(call, peer, Proxy.NO_PROXY)
     eventListener.secureConnectStart(call)
 
+    // Source trust config from the OkHttpClient so the quiche4j transport honours the same
+    // hostname verifier / trust manager as the H/1.1 / H/2 paths. When neither is set, fall
+    // back to the platform defaults that OkHttpClient.Builder would have applied.
+    val trustManager: X509TrustManager =
+      realChain.x509TrustManagerOrNull ?: Platform.get().platformTrustManager()
+    val hostnameVerifier = realChain.hostnameVerifier
+
     val pooled =
       try {
         engine.acquire(
           url.host,
           peerPort,
           peer,
+          trustManager = trustManager,
+          hostnameVerifier = hostnameVerifier,
           handshakeTimeoutMillis = chain.connectTimeoutMillis().toLong(),
           // QUIC's max_idle_timeout is a connection-level parameter (RFC 9000 §10.1) that
           // covers any packet exchange, not just application bytes. Source it from the
@@ -90,7 +99,7 @@ internal class Quiche4jCallServer(
     var returnedSuccessfully = false
     try {
       eventListener.requestHeadersStart(call)
-      val reqHeaders = buildH3Request(request, engine.userAgent)
+      val reqHeaders = buildH3Request(request)
       val hasBody = request.body != null
       val body: ByteArray? =
         if (hasBody) Buffer().also { request.body!!.writeTo(it) }.readByteArray() else null
@@ -149,10 +158,13 @@ internal class Quiche4jCallServer(
     return source.asResponseBody(contentType, -1L)
   }
 
-  private fun buildH3Request(
-    request: okhttp3.Request,
-    userAgent: String,
-  ): List<Http3Header> {
+  /**
+   * Build an HTTP/3 request header list from an okhttp3.Request. The `User-Agent`, `Host`, and
+   * content headers are already present — [BridgeInterceptor] ran earlier in the inner chain and
+   * populated them to match OkHttp's normal behaviour. We just forward everything the caller
+   * plus BridgeInterceptor produced, minus connection-level headers that don't apply to H/3.
+   */
+  private fun buildH3Request(request: okhttp3.Request): List<Http3Header> {
     val url = request.url
     val headers = mutableListOf<Http3Header>()
     headers += Http3Header(":method", request.method)
@@ -163,20 +175,12 @@ internal class Quiche4jCallServer(
         if (url.port == url.scheme.defaultPort()) url.host else "${url.host}:${url.port}",
       )
     headers += Http3Header(":path", url.encodedPath + (url.encodedQuery?.let { "?$it" } ?: ""))
-    if (request.header("user-agent") == null) headers += Http3Header("user-agent", userAgent)
     for ((name, value) in request.headers) {
       val lower = name.lowercase()
       if (lower.startsWith(":")) continue
+      // Skip connection-management headers that aren't meaningful in H/3.
       if (lower == "host" || lower == "connection" || lower == "transfer-encoding" || lower == "upgrade") continue
       headers += Http3Header(lower, value)
-    }
-    request.body?.let { body ->
-      if (body.contentLength() >= 0 && request.header("content-length") == null) {
-        headers += Http3Header("content-length", body.contentLength().toString())
-      }
-      body.contentType()?.let {
-        if (request.header("content-type") == null) headers += Http3Header("content-type", it.toString())
-      }
     }
     return headers
   }
