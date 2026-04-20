@@ -124,6 +124,11 @@ internal class Quiche4jEngine(
       listOf(
         "/etc/ssl/certs",
         "/etc/pki/tls/certs",
+        // Android ships CA certs in OpenSSL c_rehash (hash-by-hash) layout under
+        // /system/etc/security/cacerts (or its APEX-module symlink on modern Androids).
+        // BoringSSL's load_verify_locations_from_directory reads that same layout.
+        "/apex/com.android.conscrypt/cacerts",
+        "/system/etc/security/cacerts",
       )
 
     private fun defaultSystemCaBundleFile(): String? =
