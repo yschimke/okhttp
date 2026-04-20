@@ -17,6 +17,7 @@ import assertk.assertions.isGreaterThan
 import assertk.assertions.isNotEmpty
 import assertk.assertions.isNotNull
 import assertk.assertions.isTrue
+import assertk.assertions.isInstanceOf
 import java.security.cert.X509Certificate
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,7 +30,6 @@ class Quiche4jInterceptorTest {
       Quiche4jInterceptor
         .Builder()
         .userAgent("test/1.0")
-        .maxIdleTimeoutMillis(5_000)
         .allowInsecure(true)
         .build()
     assertThat(interceptor).isNotNull()
@@ -139,6 +139,61 @@ class Quiche4jInterceptorTest {
     client.newCall(request).execute().use { resp ->
       assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
     }
+  }
+
+  @Test fun `Http3Preference Force with fallback recovers when H3 fails`() {
+    // 1s handshake timeout + a port that doesn't speak QUIC (HTTPS on 443 over TCP is fine
+    // once we fall through, but UDP to :81 has no QUIC handler, so the handshake will time out).
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .connectTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+        .addInterceptor(interceptor)
+        .build()
+    val request =
+      Request
+        .Builder()
+        .url("https://cloudflare-quic.com/")
+        .tag(
+          Http3Preference::class.java,
+          Http3Preference.Force(portOverride = 81, fallback = true),
+        ).build()
+    client.newCall(request).execute().use { resp ->
+      // With fallback=true the interceptor should have caught the H/3 handshake timeout and
+      // re-dispatched through the standard chain. The real URL port is still 443, so the H/2
+      // request succeeds.
+      println("fallback ok protocol=${resp.protocol} code=${resp.code}")
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_2)
+      assertThat(resp.code).isEqualTo(200)
+    }
+  }
+
+  @Test fun `Http3Preference Force with fallback=false propagates the H3 failure`() {
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .connectTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+        .addInterceptor(interceptor)
+        .build()
+    val request =
+      Request
+        .Builder()
+        .url("https://cloudflare-quic.com/")
+        .tag(
+          Http3Preference::class.java,
+          Http3Preference.Force(portOverride = 81, fallback = false),
+        ).build()
+    val thrown =
+      try {
+        client.newCall(request).execute().also { it.close() }
+        null
+      } catch (e: java.io.IOException) {
+        e
+      }
+    assertThat(thrown).isNotNull()
+    assertThat(thrown!!).isInstanceOf(java.io.IOException::class.java)
   }
 
   @Test fun `Http3Preference Current is equivalent to no tag`() {

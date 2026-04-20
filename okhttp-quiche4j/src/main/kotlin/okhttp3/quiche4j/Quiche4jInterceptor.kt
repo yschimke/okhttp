@@ -128,7 +128,17 @@ class Quiche4jInterceptor private constructor(
         request = chain.request(),
       )
 
-    return innerChain.proceed(chain.request()).also { updateAltSvcFromResponse(it) }
+    return try {
+      innerChain.proceed(chain.request()).also { updateAltSvcFromResponse(it) }
+    } catch (e: java.io.IOException) {
+      // Http3Preference.Force(fallback=true) — the caller asked for H/3 but also asked us to
+      // try the standard stack on failure. Every other path (Current / no tag) bubbles up.
+      if (preference is Http3Preference.Force && preference.fallback) {
+        chain.proceed(outerRequest).also { updateAltSvcFromResponse(it) }
+      } else {
+        throw e
+      }
+    }
   }
 
   /** Inspect a completed response's `Alt-Svc` header(s) and update the cache. */
@@ -146,7 +156,6 @@ class Quiche4jInterceptor private constructor(
   }
 
   class Builder {
-    private var maxIdleTimeoutMillis: Long = 30_000
     private var userAgent: String = "okhttp-quiche4j"
     private var trustedCaPemFile: String? = null
     private var trustedCaDirectory: String? = null
@@ -154,8 +163,10 @@ class Quiche4jInterceptor private constructor(
     private var httpsRecordResolver: HttpsServiceRecordResolver? = null
     private var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
 
-    /** Max QUIC idle timeout in ms before the connection is closed. Default 30s. */
-    fun maxIdleTimeoutMillis(value: Long) = apply { this.maxIdleTimeoutMillis = value }
+    // QUIC handshake timeout -> OkHttpClient.Builder.connectTimeout(...).
+    // QUIC max_idle_timeout  -> OkHttpClient.Builder.readTimeout(...). Closest analog; both
+    // fire when we've gone "too long" without progress, even though QUIC's notion is slightly
+    // broader (acks count, not just application bytes).
 
     /** User-Agent header used by BridgeInterceptor-style defaults. */
     fun userAgent(value: String) = apply { this.userAgent = value }
@@ -204,7 +215,6 @@ class Quiche4jInterceptor private constructor(
     fun build(): Quiche4jInterceptor {
       val engine =
         Quiche4jEngine(
-          maxIdleTimeoutMillis = maxIdleTimeoutMillis,
           trustedCaPemFile = trustedCaPemFile,
           trustedCaDirectory = trustedCaDirectory,
           allowInsecure = allowInsecure,

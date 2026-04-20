@@ -63,7 +63,17 @@ internal class Quiche4jCallServer(
 
     val pooled =
       try {
-        engine.acquire(url.host, peerPort, peer)
+        engine.acquire(
+          url.host,
+          peerPort,
+          peer,
+          handshakeTimeoutMillis = chain.connectTimeoutMillis().toLong(),
+          // QUIC's max_idle_timeout is a connection-level parameter (RFC 9000 §10.1) that
+          // covers any packet exchange, not just application bytes. Source it from the
+          // caller's readTimeout since that's the closest analog OkHttp already exposes — and
+          // when unset, readTimeout's default (10s) matches what OkHttp applies to H/2.
+          maxIdleTimeoutMillis = chain.readTimeoutMillis().toLong(),
+        )
       } catch (e: Exception) {
         val ioe = e as? IOException ?: IOException(e)
         eventListener.connectFailed(call, peer, Proxy.NO_PROXY, null, ioe)

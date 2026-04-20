@@ -47,15 +47,18 @@ sealed class Http3Preference {
 
   /**
    * Force the interceptor to serve the request over HTTP/3, bypassing all discovery signals.
-   * Fails the call if the origin does not actually speak H/3 on the target port — use the
-   * [Current] preference (or just no tag) to let the interceptor auto-detect.
    *
    * @param portOverride Optional UDP port to connect to. Defaults to the port from the request's
    *   URL. Use this when an origin speaks H/3 on a non-standard UDP port but its HTTPS URL
    *   still refers to 443.
+   * @param fallback When `true` (default), the interceptor falls back to OkHttp's standard
+   *   H/1.1 / H/2 stack if the HTTP/3 attempt fails (handshake timeout, UDP unreachable,
+   *   quiche error, ...). When `false`, the original H/3 error propagates to the caller.
+   *   Use `false` for tests or debugging where masking the H/3 failure would be misleading.
    */
   data class Force(
     val portOverride: Int? = null,
+    val fallback: Boolean = true,
   ) : Http3Preference()
 
   companion object {

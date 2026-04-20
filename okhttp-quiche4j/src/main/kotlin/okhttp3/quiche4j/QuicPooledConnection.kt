@@ -286,8 +286,10 @@ internal class QuicPooledConnection private constructor(
       key: PoolKey,
       peer: InetSocketAddress,
       engine: Quiche4jEngine,
+      handshakeTimeoutMillis: Long,
+      maxIdleTimeoutMillis: Long,
     ): QuicPooledConnection {
-      val config = engine.newConfig()
+      val config = engine.newConfig(maxIdleTimeoutMillis)
       val connId: ByteArray = Quiche.newConnectionId()
       val socket =
         DatagramSocket().apply {
@@ -304,7 +306,7 @@ internal class QuicPooledConnection private constructor(
         }
 
       try {
-        pumpHandshake(quicConn, socket, peer)
+        pumpHandshake(quicConn, socket, peer, handshakeTimeoutMillis)
         val h3Config = Http3ConfigBuilder().build()
         val h3 = Http3Connection.withTransport(quicConn, h3Config)
         val handshake = buildHandshake(quicConn)
@@ -334,13 +336,14 @@ internal class QuicPooledConnection private constructor(
       conn: Connection,
       socket: DatagramSocket,
       peer: InetSocketAddress,
+      handshakeTimeoutMillis: Long,
     ) {
       val buf = ByteArray(Quiche4jEngine.MAX_DATAGRAM_SIZE)
       // First send (initial crypto).
       drainSendStatic(conn, socket, buf, peer)
       val prevTimeout = socket.soTimeout
       socket.soTimeout = 200
-      val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+      val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(handshakeTimeoutMillis)
       try {
         while (!conn.isEstablished) {
           if (conn.isClosed) throw IOException("QUIC connection closed during handshake")

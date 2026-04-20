@@ -27,7 +27,6 @@ import kotlin.concurrent.withLock
  * configuration at this point. See `PLAN.md` for the M3 migration plan to a true shared engine.
  */
 internal class Quiche4jEngine(
-  val maxIdleTimeoutMillis: Long,
   val trustedCaPemFile: String?,
   val trustedCaDirectory: String?,
   val allowInsecure: Boolean,
@@ -46,13 +45,16 @@ internal class Quiche4jEngine(
     host: String,
     port: Int,
     peer: InetSocketAddress,
+    handshakeTimeoutMillis: Long,
+    maxIdleTimeoutMillis: Long,
   ): QuicPooledConnection {
     val key = PoolKey(host, port)
     poolLock.withLock {
       val existing = pool[key]
       if (existing != null && !existing.closed) return existing
       if (existing != null && existing.closed) pool.remove(key, existing)
-      val fresh = QuicPooledConnection.connect(key, peer, this)
+      val fresh =
+        QuicPooledConnection.connect(key, peer, this, handshakeTimeoutMillis, maxIdleTimeoutMillis)
       pool[key] = fresh
       return fresh
     }
@@ -72,7 +74,7 @@ internal class Quiche4jEngine(
     }
   }
 
-  fun newConfig(): io.quiche4j.Config {
+  fun newConfig(maxIdleTimeoutMillis: Long): io.quiche4j.Config {
     val builder =
       ConfigBuilder(Quiche.PROTOCOL_VERSION)
         .withApplicationProtos(Http3.APPLICATION_PROTOCOL)
