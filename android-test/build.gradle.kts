@@ -93,6 +93,7 @@ dependencies {
   androidTestImplementation(projects.loggingInterceptor)
   androidTestImplementation(projects.okhttpSse)
   androidTestImplementation(projects.okhttpTls)
+  androidTestImplementation(projects.okhttpQuiche4j)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.http.client5)
