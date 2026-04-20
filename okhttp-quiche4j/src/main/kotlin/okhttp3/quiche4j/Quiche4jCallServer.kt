@@ -50,7 +50,11 @@ internal class Quiche4jCallServer(
     val addresses = realChain.dns.lookup(url.host)
     eventListener.dnsEnd(call, url.host, addresses)
     if (addresses.isEmpty()) throw IOException("No addresses for ${url.host}")
-    val peer = InetSocketAddress(addresses.first(), url.port)
+    // Honor Http3Preference.Force.portOverride if the caller attached one. Falls back to the
+    // URL's port (which remains the :authority the origin sees — we only redirect UDP datagrams).
+    val peerPort =
+      (Http3Preference.of(request) as? Http3Preference.Force)?.portOverride ?: url.port
+    val peer = InetSocketAddress(addresses.first(), peerPort)
 
     val sentAt = System.currentTimeMillis()
 
@@ -59,7 +63,7 @@ internal class Quiche4jCallServer(
 
     val pooled =
       try {
-        engine.acquire(url.host, url.port, peer)
+        engine.acquire(url.host, peerPort, peer)
       } catch (e: Exception) {
         val ioe = e as? IOException ?: IOException(e)
         eventListener.connectFailed(call, peer, Proxy.NO_PROXY, null, ioe)

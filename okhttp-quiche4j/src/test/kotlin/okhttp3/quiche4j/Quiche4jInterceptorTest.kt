@@ -77,6 +77,88 @@ class Quiche4jInterceptorTest {
     assertThat(second.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
   }
 
+  @Test fun `Http3Preference ForceOff makes the interceptor fall through`() {
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val fell = java.util.concurrent.atomic.AtomicBoolean(false)
+    val client =
+      OkHttpClient
+        .Builder()
+        .addInterceptor(interceptor)
+        .addInterceptor { c ->
+          fell.set(true)
+          okhttp3.Response
+            .Builder()
+            .request(c.request())
+            .protocol(okhttp3.Protocol.HTTP_2)
+            .code(200)
+            .message("OK")
+            .body(okhttp3.ResponseBody.create(null, "fell"))
+            .build()
+        }.build()
+    val request =
+      Request
+        .Builder()
+        .url("https://cloudflare-quic.com/")
+        .tag(Http3Preference::class.java, Http3Preference.ForceOff)
+        .build()
+    client.newCall(request).execute().use { resp ->
+      assertThat(fell.get()).isTrue()
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_2)
+    }
+  }
+
+  @Test fun `Http3Preference Force bypasses discovery`() {
+    // HttpsAware Dns that claims "no h3" — would normally force fall-through.
+    val noH3Dns =
+      object : okhttp3.Dns, HttpsAware {
+        override fun lookup(hostname: String) = okhttp3.Dns.SYSTEM.lookup(hostname)
+
+        override fun getHttpsServiceRecord(hostname: String) =
+          HttpsServiceRecord(
+            priority = 1,
+            targetName = ".",
+            port = null,
+            alpnIds = listOf("h2"),
+            ipAddressHints = emptyList(),
+            echConfigList = null,
+          )
+      }
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .dns(noH3Dns)
+        .addInterceptor(interceptor)
+        .build()
+    val request =
+      Request
+        .Builder()
+        .url("https://cloudflare-quic.com/")
+        .tag(Http3Preference::class.java, Http3Preference.Force())
+        .build()
+    client.newCall(request).execute().use { resp ->
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
+    }
+  }
+
+  @Test fun `Http3Preference Current is equivalent to no tag`() {
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .addInterceptor(interceptor)
+        .build()
+    val request =
+      Request
+        .Builder()
+        .url("https://cloudflare-quic.com/")
+        .tag(Http3Preference::class.java, Http3Preference.Current)
+        .build()
+    client.newCall(request).execute().use { resp ->
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
+    }
+  }
+
   @Test fun `Alt-Svc cache seeded after a successful H3 fetch`() {
     val interceptor = Quiche4jInterceptor.Builder().build()
     val client =

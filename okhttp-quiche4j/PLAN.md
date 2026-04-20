@@ -252,10 +252,12 @@ Implementations:
 
 Absence of an HTTPS record doesn't mean "no H3" — many origins speak H3 but
 haven't published HTTPS records. Fallback order:
-1. Use HTTPS record if present and `alpnIds` contains `"h3"`.
-2. Use an Alt-Svc cache populated from prior H1/H2 responses on the same
+1. An explicit [`Http3Preference`](src/main/kotlin/okhttp3/quiche4j/Http3Preference.kt)
+   tag on the request (`Force` / `ForceOff` / `Current`). Highest priority —
+   bypasses all discovery.
+2. Use HTTPS record if present and `alpnIds` contains `"h3"`.
+3. Use an Alt-Svc cache populated from prior H1/H2 responses on the same
    origin.
-3. Use an explicit `Request.tag(Protocol.HTTP_3)` caller hint.
 4. Skip H3 for this request.
 
 Alt-Svc caching is wired in the current module via

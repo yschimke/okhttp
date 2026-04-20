@@ -47,6 +47,11 @@ class Quiche4jInterceptor private constructor(
       return chain.proceed(outerRequest)
     }
 
+    val preference = Http3Preference.of(outerRequest)
+    if (preference is Http3Preference.ForceOff) {
+      return chain.proceed(outerRequest).also { updateAltSvcFromResponse(it) }
+    }
+
     val realChain = chain as RealInterceptorChain
 
     // Optional HTTPS-record check. Two sources, in priority order:
@@ -83,14 +88,16 @@ class Quiche4jInterceptor private constructor(
         else -> null
       }
     // Decision: prefer HTTP/3 when any of the following is true:
-    //   (a) discovery is disabled (no HTTPS-record resolver, no HttpsAware Dns, no cached
+    //   (a) the request carries Http3Preference.Force — bypass all discovery
+    //   (b) discovery is disabled (no HTTPS-record resolver, no HttpsAware Dns, no cached
     //       Alt-Svc) — the caller asked for HTTP/3 by adding this interceptor
-    //   (b) HTTPS record explicitly advertises h3
-    //   (c) Alt-Svc cache has an unexpired h3 entry for this origin
+    //   (c) HTTPS record explicitly advertises h3
+    //   (d) Alt-Svc cache has an unexpired h3 entry for this origin
     val origin = AltSvcOrigin.of(outerRequest.url)
     val altSvcHasH3 = altSvcCache.get(origin).any { it.protocolId.equals("h3", true) }
     val shouldHandle =
       when {
+        preference is Http3Preference.Force -> true
         !discoveryEnabled -> true
         record?.supportsHttp3 == true -> true
         altSvcHasH3 -> true
