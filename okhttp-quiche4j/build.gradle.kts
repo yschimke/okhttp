@@ -16,7 +16,7 @@ project.applyJavaModules("okhttp3.quiche4j")
 dependencies {
   "friendsApi"(projects.okhttp)
   api("io.quiche4j:quiche4j-core")
-  // implementation(libs.dnsjava) — wired in on the follow-up branch for the HTTPS-record resolver.
+  implementation(libs.dnsjava)
 
   testImplementation(projects.okhttpTestingSupport)
   testImplementation(projects.mockwebserver3)

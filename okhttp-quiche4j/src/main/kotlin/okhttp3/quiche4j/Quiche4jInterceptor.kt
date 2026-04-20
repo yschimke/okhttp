@@ -32,18 +32,59 @@ import okhttp3.internal.http.RealInterceptorChain
  */
 class Quiche4jInterceptor private constructor(
   internal val engine: Quiche4jEngine,
+  internal val httpsRecordResolver: HttpsServiceRecordResolver?,
 ) : Interceptor {
   /** Visible to tests: size of the pooled-connection cache. */
   internal val pooledConnectionCount: Int
     get() = engine.pooledConnectionCount()
+
   override fun intercept(chain: Interceptor.Chain): Response {
     // QUIC requires TLS — plaintext http:// URLs fall through to OkHttp's standard transport.
     // We intentionally do not throw here; the interceptor should be a no-op when it can't help.
-    if (chain.request().url.scheme != "https") {
-      return chain.proceed(chain.request())
+    val outerRequest = chain.request()
+    if (outerRequest.url.scheme != "https") {
+      return chain.proceed(outerRequest)
     }
 
     val realChain = chain as RealInterceptorChain
+
+    // Optional HTTPS-record check. Two sources, in priority order:
+    //   1. The OkHttpClient's Dns, if it implements HttpsAware. Preferred because the lookup has
+    //      already happened as part of the regular A/AAAA query.
+    //   2. The explicit resolver passed on the Builder. Used by callers who don't want to swap
+    //      their Dns wholesale.
+    // If either source returns a record that doesn't advertise "h3", fall through to OkHttp's
+    // normal stack. If the lookup fails or returns no records, we also fall through — absence
+    // of a record doesn't mean "no H/3", but neither does it tell us anything useful, so the
+    // safe default is to not interfere when discovery was explicitly requested.
+    val hostname = outerRequest.url.host
+    val dns = realChain.dns
+    val discoveryEnabled = dns is HttpsAware || httpsRecordResolver != null
+    val record: HttpsServiceRecord? =
+      when {
+        dns is HttpsAware -> {
+          // Trigger the (parallel) A/AAAA + HTTPS lookup on the shared Dns so the cache is
+          // populated by the time we query it. If we end up falling through, OkHttp's core will
+          // hit the same Dns and reuse whatever caching the underlying system provides.
+          try {
+            dns.lookup(hostname)
+          } catch (_: Throwable) {
+            // DNS failure — best-effort. chain.proceed() will re-attempt and surface the error.
+          }
+          dns.getHttpsServiceRecord(hostname)
+        }
+        httpsRecordResolver != null ->
+          try {
+            httpsRecordResolver.lookup(hostname).firstOrNull()
+          } catch (_: Throwable) {
+            null
+          }
+        else -> null
+      }
+    if (discoveryEnabled && record?.supportsHttp3 != true) {
+      return chain.proceed(outerRequest)
+    }
+
     val call = realChain.call
 
     // BridgeInterceptor and CacheInterceptor pick up cookie jar/cache from the chain directly.
@@ -72,6 +113,7 @@ class Quiche4jInterceptor private constructor(
     private var trustedCaPemFile: String? = null
     private var trustedCaDirectory: String? = null
     private var allowInsecure: Boolean = false
+    private var httpsRecordResolver: HttpsServiceRecordResolver? = null
 
     /** Max QUIC idle timeout in ms before the connection is closed. Default 30s. */
     fun maxIdleTimeoutMillis(value: Long) = apply { this.maxIdleTimeoutMillis = value }
@@ -101,6 +143,18 @@ class Quiche4jInterceptor private constructor(
      */
     fun allowInsecure(value: Boolean) = apply { this.allowInsecure = value }
 
+    /**
+     * Optional HTTPS DNS record (RFC 9460) resolver. If set, the interceptor looks up the
+     * origin's HTTPS record before taking over the call. If no record advertises `"h3"` in its
+     * ALPN list, or if the lookup fails, the interceptor calls `chain.proceed()` and lets
+     * OkHttp's standard H/1.1/H/2 stack handle the request. If unset (default), every HTTPS
+     * request reaching this interceptor is attempted over HTTP/3.
+     *
+     * Pass [HttpsServiceRecordResolver.DEFAULT] to use the dnsjava-backed implementation.
+     */
+    fun httpsServiceRecordResolver(resolver: HttpsServiceRecordResolver?) =
+      apply { this.httpsRecordResolver = resolver }
+
     fun build(): Quiche4jInterceptor {
       val engine =
         Quiche4jEngine(
@@ -110,7 +164,7 @@ class Quiche4jInterceptor private constructor(
           allowInsecure = allowInsecure,
           userAgent = userAgent,
         )
-      return Quiche4jInterceptor(engine)
+      return Quiche4jInterceptor(engine, httpsRecordResolver)
     }
   }
 }

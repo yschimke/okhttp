@@ -227,12 +227,19 @@ Implementations:
 
 - **Stage 1** (this module): no discovery. Caller adds `Quiche4jInterceptor`
   because they know the origin speaks H3.
-- **Stage 1.5** (immediate follow-up, same module): optional
-  `Quiche4jInterceptor.Builder.httpsServiceRecordResolver(...)` — if provided,
-  the interceptor runs the lookup first, skips the fetch if `"h3"` isn't in
-  `alpnIds` (falling through to OkHttp's normal stack by calling
-  `chain.proceed`). `ipAddressHints` save a round trip; `port`/`targetName`
-  override the URL's defaults as per RFC 9460.
+- **Stage 1.5** (done in this module): two opt-in paths:
+  1. `Quiche4jInterceptor.Builder.httpsServiceRecordResolver(...)` — explicit
+     resolver; the interceptor calls it inline.
+  2. `.dns(HttpsAwareDns(...))` on the `OkHttpClient` — a `Dns` wrapper that
+     fires the HTTPS record lookup in parallel with the A/AAAA lookup and
+     implements `HttpsAware` so the interceptor can read the cached result.
+     Preferred: one DNS query serves both code paths. Mirrors PR 9383's
+     `AndroidDnsResolverDns` on Android 36.
+
+  In either case: if no record advertises `"h3"`, the interceptor calls
+  `chain.proceed(request)` and OkHttp's H/1.1 or H/2 stack handles the
+  request. `ipAddressHints`, `port`, and `targetName` from the record are
+  still unused (tracked for Stage 2 route planning).
 - **Stage 2**: the resolver moves into `RealRoutePlanner` so it governs all
   protocol selection — H3 vs H2-over-TCP races only fire when the HTTPS
   record advertises both.

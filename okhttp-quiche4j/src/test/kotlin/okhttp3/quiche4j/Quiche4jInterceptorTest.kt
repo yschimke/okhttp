@@ -15,6 +15,7 @@ import assertk.assertions.isEqualTo
 import assertk.assertions.isGreaterThan
 import assertk.assertions.isNotEmpty
 import assertk.assertions.isNotNull
+import assertk.assertions.isTrue
 import java.security.cert.X509Certificate
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -73,6 +74,70 @@ class Quiche4jInterceptorTest {
     println("pool after first=$afterFirst after second=$afterSecond")
     assertThat(afterSecond).isEqualTo(1) // same entry — pooling worked
     assertThat(second.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
+  }
+
+  @Test fun `fall-through to outer chain when HTTPS record lacks h3`() {
+    val fakeDns =
+      object : okhttp3.Dns, HttpsAware {
+        override fun lookup(hostname: String): List<java.net.InetAddress> = okhttp3.Dns.SYSTEM.lookup(hostname)
+
+        override fun getHttpsServiceRecord(hostname: String): HttpsServiceRecord =
+          HttpsServiceRecord(
+            priority = 1,
+            targetName = ".",
+            port = null,
+            alpnIds = listOf("h2"), // deliberately no h3
+            ipAddressHints = emptyList(),
+            echConfigList = null,
+          )
+      }
+    val sentinel = java.util.concurrent.atomic.AtomicBoolean(false)
+    val fallThroughInterceptor =
+      okhttp3.Interceptor { c ->
+        sentinel.set(true)
+        okhttp3.Response
+          .Builder()
+          .request(c.request())
+          .protocol(okhttp3.Protocol.HTTP_2)
+          .code(200)
+          .message("OK")
+          .body(okhttp3.ResponseBody.create(null, "fallthrough"))
+          .build()
+      }
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .dns(fakeDns)
+        .addInterceptor(interceptor)
+        .addInterceptor(fallThroughInterceptor)
+        .build()
+    val request = Request.Builder().url("https://example.com/").build()
+    client.newCall(request).execute().use { resp ->
+      assertThat(sentinel.get()).isTrue()
+      assertThat(resp.body?.string()).isEqualTo("fallthrough")
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_2)
+    }
+  }
+
+  @Test fun `HttpsAwareDns advertises h3 for cloudflare`() {
+    val dns = HttpsAwareDns()
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .dns(dns)
+        .addInterceptor(interceptor)
+        .build()
+    val request = Request.Builder().url("https://cloudflare-quic.com/").build()
+    client.newCall(request).execute().use { resp ->
+      // Trigger the lookup path via the real call (this also seeds the cache).
+      val record = dns.getHttpsServiceRecord("cloudflare-quic.com")
+      println("https-record alpn=${record?.alpnIds} priority=${record?.priority} target=${record?.targetName}")
+      assertThat(record).isNotNull()
+      assertThat(record!!.supportsHttp3).isTrue()
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
+    }
   }
 
   @Test fun `live fetch against public h3 server with real TLS`() {
