@@ -10,71 +10,117 @@ returns a normal `Response` so callers see `Protocol.HTTP_3`.
 Unlike the Cronet bridge, quiche4j is *transport only*. We own DNS, UDP
 sockets, TLS configuration, pooling, and timers.
 
-## Status
+---
 
-Stage 1 scaffolding (POC). Not yet wired for general traffic. See the Stage 1 section below for the exact surface.
+## Status at a glance
+
+**Stage 1 is feature-complete as a POC.** Live H/3 fetches work on the JVM
+and on Android (emulator + real Pixel 10a hardware) against public H/3
+endpoints, with TLS verified through the OkHttpClient's own
+`X509TrustManager` + `HostnameVerifier`. 20 JVM unit/integration tests
+pass; 2 live instrumentation tests pass on a real device.
+
+Legend: ✅ done · 🚧 in progress · ⏳ pending / out of POC scope.
+
+### Stage 1 — bridge interceptor (this module)
+
+| Area | Status | Notes |
+|---|---|---|
+| `Quiche4jInterceptor` short-circuits OkHttp chain | ✅ | |
+| Inner chain with `BridgeInterceptor` + `CacheInterceptor` | ✅ | caching works via the real `CacheInterceptor` |
+| `QuicPooledConnection` + per-connection I/O thread + task queue | ✅ | all quiche calls serialised on one thread per origin |
+| `Quiche4jEngine` pool keyed by `(host, port)` | ✅ | reuse verified by `two sequential fetches reuse the pooled connection` |
+| Streaming `QuicBodySource` (okio `Source`) | ✅ | pumps the pool on demand; no in-memory body buffering |
+| `Response.handshake.peerCertificates` populated | ✅ | JNI `quiche_conn_peer_cert_chain` + Java-side `CertificateFactory` |
+| TLS trust via the `OkHttpClient`'s `X509TrustManager` | ✅ | Platform default fallback; Android system trust store works |
+| Hostname verification via the `OkHttpClient`'s `HostnameVerifier` | ✅ | `OkHostnameVerifier` default; synthetic `SSLSession` for custom verifiers |
+| `Http3Preference` tag (`Force` / `ForceOff` / `Current`) | ✅ | per-request override; `Force.fallback` catches H/3 failure |
+| Timeouts sourced from OkHttpClient | ✅ | `connectTimeout → handshake`, `readTimeout → max_idle` |
+| Alt-Svc cache (RFC 7838) | ✅ | pluggable `AltSvcCache` + default `InMemoryAltSvcCache`; seeded on every response |
+| HTTPS DNS records (RFC 9460) discovery | ✅ | dnsjava + optional `HttpsAwareDns` Dns wrapper on JVM |
+| Android ABI cross-compile (`cargo-ndk`) | ✅ | `./gradlew :quiche4j-jni:jar -PandroidAbis=arm64-v8a,x86_64` |
+| Android instrumentation test (`Quiche4jAndroidTest`) | ✅ | `h3FetchAgainstCloudflareQuic`, `explicitForcePreferenceUsesQuiche4j` green on Pixel 10a |
+| EventListener coverage (dns/connect/secureConnect/headers/body/connection) | ✅ | matches the table in the per-request flow below |
+| `CacheInterceptor` direct tests (cache hit / conditional 304) | ⏳ | M1-T1 |
+| Caddy container test (H/3 + upload path) | ⏳ | M1-T1 |
+| Android HTTPS-record resolver via `android.net.DnsResolver` | ⏳ | dnsjava's UDP/53 queries are blocked in the Android sandbox; see test's kdoc |
+| Cancellation polling (`Call.cancel()` tears down QUIC stream) | ⏳ | |
+| Duplex request body (`RequestBody.isDuplex() == true`) | ⏳ | design in [Duplex requests](#duplex-requests); pool already serialises quiche correctly so it's additive |
+| HTTP CONNECT proxy | ⏳ | UDP doesn't tunnel; MASQUE (RFC 9298) is Stage-3 |
+| WebSocket | ⏳ | out of H/3 scope |
+| Trailers | ⏳ | ignored |
+
+### Stage 2 — peer transport inside OkHttp core (internal refactor)
+
+All pending — see the [Stage 2 section](#stage-2--peer-transport-inside-okhttp-core).
+
+### Stage 3 — public API (breaking, 6.0)
+
+All pending — see the [Stage 3 section](#stage-3--full-surface-support-major-version).
+
+---
+
+## Current public API
+
+```kotlin
+val interceptor = Quiche4jInterceptor.Builder()
+  .httpsServiceRecordResolver(HttpsServiceRecordResolver.DEFAULT)  // optional
+  .altSvcCache(InMemoryAltSvcCache())                              // optional; default in-memory
+  .build()
+
+val client = OkHttpClient.Builder()
+  // Optional: discover H/3 eagerly; Dns.lookup() also starts an HTTPS-type query.
+  .dns(HttpsAwareDns())
+  // Optional per-request override — Force / ForceOff / Current
+  .addInterceptor(interceptor)   // must be the LAST application interceptor
+  .build()
+
+val request = Request.Builder()
+  .url("https://cloudflare-quic.com/")
+  .tag(Http3Preference::class.java, Http3Preference.Current)       // optional
+  .build()
+```
+
+Trust / hostname / timeouts / user-agent come from the `OkHttpClient`
+itself — the interceptor doesn't have its own knobs for these because
+`RealInterceptorChain` already exposes them (`connectTimeoutMillis`,
+`readTimeoutMillis`, `x509TrustManagerOrNull`, `hostnameVerifier`) and
+`BridgeInterceptor` in the inner chain handles `User-Agent`.
+
+---
 
 ## Three-stage roadmap
 
 The end state is HTTP/3 as a peer of H1/H2 inside OkHttp's transport core. We
 get there in three stages, each deliverable on its own.
 
-### Stage 1 — Bridge interceptor (this module)
+### Stage 1 — bridge interceptor (this module)
 
-**Goal:** working HTTP/3 with zero change to OkHttp core.
+**Goal:** working HTTP/3 with zero change to OkHttp core. **✅ feature-complete as a POC** — see the [Status at a glance](#status-at-a-glance) above.
 
-- New opt-in module `okhttp-quiche4j`, added as the **last application
-  interceptor**. Cronet pattern.
+- Added as the **last application interceptor**. Cronet pattern.
 - Short-circuits the call chain: the interceptor builds a `Response` directly
-  from a QUIC fetch and never calls `chain.proceed()`.
+  from a QUIC fetch and never calls `chain.proceed()` unless a signal
+  (`Http3Preference.ForceOff`, no-h3 HTTPS record, non-https URL) says fall through.
 - Caching: because we short-circuit, `CacheInterceptor` never runs in the
   outer chain. To preserve cache semantics, we run a **nested chain** inside
   our interceptor containing `[BridgeInterceptor, CacheInterceptor,
   Quiche4jCallServer]`. The innermost interceptor (`Quiche4jCallServer`) is
   the one that actually talks QUIC; everything above it is stock OkHttp.
   Net effect: cache reads/writes work exactly as they do today.
-- EventListener: we emit what we reasonably can from the bridge position —
+- EventListener emitted from the bridge position:
   `dnsStart/End`, `connectStart/End`, `secureConnectStart/End`,
   `connectFailed`, `connectionAcquired/Released` (synthetic `Connection`),
   `requestHeadersStart/End`, `requestBodyStart/End`,
-  `responseHeadersStart/End`, `responseBodyStart/End`, `requestFailed`,
-  `responseFailed`, `canceled`. `callStart/End/Failed` are emitted by OkHttp
-  as usual.
+  `responseHeadersStart/End`, `responseBodyStart/End`,
+  `responseFailed`. `callStart/End/Failed` fire from OkHttp core as usual.
+- TLS: quiche's own `verify_peer` is disabled; we extract the peer cert
+  chain via the JNI binding and run the OkHttpClient's own
+  `X509TrustManager.checkServerTrusted` + hostname verification after the
+  handshake. Failure → `SSLPeerUnverifiedException` and the connection is
+  discarded before publishing to the pool.
 
-**Public API (Stage 1):**
-
-```kotlin
-val interceptor = Quiche4jInterceptor.Builder()
-  .userAgent("okhttp/5.x quiche4j")
-  .maxIdleTimeoutMillis(30_000)
-  .build()
-
-val client = OkHttpClient.Builder()
-  .addInterceptor(interceptor)   // must be the LAST application interceptor
-  .build()
-```
-
-**Known gaps in Stage 1 (documented, not fixed):**
-
-- `Handshake.peerCertificates()` is empty — quiche4j doesn't surface the peer
-  cert chain yet. See [upstream changes](#upstream-quiche4j-changes) below.
-- `networkResponse`, `cacheResponse`, `priorResponse` on the returned
-  `Response` are set by the nested chain only when applicable
-  (cache hits/conditional hits produce `cacheResponse`).
-- `RequestBody.isDuplex() == true` is unsupported — see [duplex requests][]
-  below for the plan.
-- Response body is drained to memory (no streaming `okio.Source` yet).
-- No connection pooling — each call gets its own `DatagramSocket` and QUIC
-  connection.
-- No Alt-Svc discovery or HTTPS-record resolution yet (see next section).
-
-[duplex requests]: #duplex-requests
-- No HTTP CONNECT proxy (UDP doesn't tunnel through HTTP CONNECT). Direct
-  connections only.
-- No WebSocket.
-- Trailers are ignored.
-
-### Stage 2 — Peer transport inside OkHttp core
+### Stage 2 — peer transport inside OkHttp core
 
 **Goal:** `OkHttpClient.Builder().protocols(listOf(HTTP_3, HTTP_2, HTTP_1_1))`
 "just works." No explicit interceptor needed; caller sees `Protocol.HTTP_3`
@@ -92,14 +138,13 @@ Internal refactors (no interceptor-level bridge any more):
 3. **Route planning.** `RealRoutePlanner` learns UDP/QUIC routes. Plans TCP
    and QUIC in parallel; whichever finishes the handshake first wins
    (happy-eyeballs over L4).
-4. **HTTP/3 discovery.** See the dedicated section below — this should be wired
-   early (Stage 1→2 boundary), not late. In order of precedence:
-   explicit `Request.tag(Protocol.HTTP_3)`; HTTPS DNS records (RFC 9460,
-   SVCB/HTTPS); Alt-Svc cache (RFC 7838).
+4. **HTTP/3 discovery.** See [HTTPS DNS records](#https-dns-records-rfc-9460)
+   — the resolver moves into `RealRoutePlanner` so discovery governs all
+   protocol selection.
 5. **Connection pool.** Reuse `RealConnectionPool` keyed additionally by
    transport.
 
-Public API (Stage 2, all additive):
+Public API additions (Stage 2, all additive):
 
 - `Protocol.HTTP_3` / `Protocol.QUIC` — already defined.
 - `OkHttpClient.Builder.quicEngineFactory(...)` — optional injection slot
@@ -107,7 +152,7 @@ Public API (Stage 2, all additive):
   (netty-incubator-codec-http3, msquic) alongside or instead of quiche4j.
 - Optional `EventListener.altSvcDiscovered(...)` with a default no-op.
 
-### Stage 3 — Full surface support (major-version)
+### Stage 3 — full surface support (major-version)
 
 Areas where we'd want OkHttp's **public** API to evolve for HTTP/3 to be
 first-class. These are the candidates, not commitments.
@@ -129,8 +174,15 @@ first-class. These are the candidates, not commitments.
 - **First-class `QuicConfig`** (sibling of `ConnectionSpec`): max idle
   timeout, initial flow-control windows, datagram support, 0-RTT opt-in,
   qlog.
+- **ECH (Encrypted Client Hello).** Pairs with the HTTPS DNS record's
+  `echConfigList`. Blocked on quiche native-side ECH support (0.26.1
+  exposes `Config.with_boring_ssl_ctx_builder` as an escape hatch; a
+  native ECH API in quiche or a BoringSSL-ctx callback in quiche4j would
+  unblock this).
 
-## Architecture (Stage 1)
+---
+
+## Architecture (Stage 1 — current)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -140,23 +192,38 @@ first-class. These are the candidates, not commitments.
 └──────────────────────────────────────────────────────────────┘
    │
    │ intercept(outerChain):
-   │   runs an INNER chain to preserve cache semantics
+   │   · discovery: Http3Preference tag > HTTPS record > Alt-Svc
+   │   · if no "h3" signal → chain.proceed() (still updates Alt-Svc)
+   │   · otherwise run an INNER chain to preserve cache semantics
    ▼
    ┌────────────────────────────────────────────────────┐
-   │ RealInterceptorChain(inner)                        │
-   │   BridgeInterceptor(cookieJar)                     │
-   │   CacheInterceptor(client.cache)                   │
-   │   Quiche4jCallServer                               │
+   │ RealInterceptorChain (inner)                       │
+   │   BridgeInterceptor        ← host, UA, cookies     │
+   │   CacheInterceptor         ← cache reads/writes    │
+   │   Quiche4jCallServer       ← the QUIC fetch        │
    └────────────────────────────────────────────────────┘
-                                │ proceed()
+                                │
                                 ▼
    ┌────────────────────────────────────────────────────┐
-   │ Quiche4jEngine (shared across interceptor calls)   │
-   │   DatagramChannel + selector thread                │
-   │   QuicConnectionPool keyed on (host, port)         │
-   │   Scheduled timer wheel → conn.onTimeout()         │
-   │   Executor for h3.poll() dispatches                │
+   │ Quiche4jEngine                                     │
+   │   pool: ConcurrentHashMap<(host,port),             │
+   │                           QuicPooledConnection>    │
    └────────────────────────────────────────────────────┘
+                                │
+                                ▼
+   ┌────────────────────────────────────────────────────┐
+   │ QuicPooledConnection  (per origin)                 │
+   │   · DatagramSocket                                 │
+   │   · quiche::Connection + h3::Connection            │
+   │   · dedicated daemon I/O thread                    │
+   │   · task queue (all quiche calls serialise here)   │
+   │   · streams: ConcurrentHashMap<sid, QuicStream>    │
+   └────────────────────────────────────────────────────┘
+                                │
+                                ▼
+   QuicStream (per request)                   QuicBodySource (okio Source)
+     · headersFuture                            ← consumer drains body queue
+     · bodyQueue (Bytes | End | Error)
 ```
 
 ## Per-request flow (Stage 1)
@@ -164,20 +231,24 @@ first-class. These are the candidates, not commitments.
 | Step | OkHttp side | quiche4j side |
 |---|---|---|
 | 1 | Request enters `Quiche4jInterceptor.intercept` | — |
-| 2 | Inner chain: `BridgeInterceptor` adds host/UA/cookies | — |
-| 3 | `CacheInterceptor` checks cache; may short-circuit | — |
-| 4 | Cache miss → `Quiche4jCallServer.intercept` called | — |
-| 5 | DNS resolve via `client.dns`, fire `dnsStart/End` | — |
-| 6 | `connectStart/End`, `secureConnectStart/End` | `Quiche.connect`, pump packets until `isEstablished` |
-| 7 | `requestHeadersStart/End` | `h3.sendRequest(headers, fin=body==null)` |
-| 8 | `requestBodyStart/End` | loop `h3.sendBody` |
-| 9 | `responseHeadersStart/End` | await `onHeaders` via blocking queue |
-| 10 | Build `Response` with `Protocol.HTTP_3` | — |
-| 11 | `responseBodyStart/End`, via `QuicBodySource` | drain `onData` → `h3.recvBody` into okio |
-| 12 | `CacheInterceptor` stores response if cacheable | — |
-| 13 | `connectionReleased` | return connection to pool |
+| 2 | Discovery: `Http3Preference` tag / HTTPS record / Alt-Svc | — |
+| 3 | Inner chain: `BridgeInterceptor` adds Host/UA/cookies | — |
+| 4 | `CacheInterceptor` checks cache; may short-circuit | — |
+| 5 | Cache miss → `Quiche4jCallServer.intercept` called | — |
+| 6 | DNS resolve via `chain.dns`, fires `dnsStart/End` | — |
+| 7 | `connectStart/End`, `secureConnectStart/End` | pool `acquire`: `Quiche.connect`, pump packets until `isEstablished` |
+| 8 | (between 7 and 9) | Java-side `TrustManager` + hostname verify |
+| 9 | `connectionAcquired` with synthetic `QuicConnectionHandle` | — |
+| 10 | `requestHeadersStart/End` | `h3.sendRequest(headers, fin=body==null)` — serialised via pool's task queue |
+| 11 | `requestBodyStart/End` (if body) | one-shot `sendBody(..., fin=true)` |
+| 12 | `responseHeadersStart/End` | wait on `headersFuture` fed by I/O thread's `h3.poll` |
+| 13 | Build `Response` with `Protocol.HTTP_3` and populated `Handshake` | — |
+| 14 | Caller drains `responseBody` via `QuicBodySource` | I/O thread queues body bytes; `onFinished` → EOF |
+| 15 | `responseBodyEnd` + `connectionReleased` on body close | stream removed from pool's map; connection stays warm |
 
-## HTTPS DNS records (RFC 9460) — wire this early
+---
+
+## HTTPS DNS records (RFC 9460) — ✅ wired
 
 HTTPS/SVCB service records are the standard way to learn that an origin speaks
 HTTP/3 *without* a prior HTTP/1.1 or HTTP/2 exchange. A single DNS query
@@ -189,18 +260,15 @@ returns, for `https://example.com/`:
 - `ipAddressHints` — pre-resolved A/AAAA hints, no second DNS round trip,
 - `echConfigList` — the ECHConfig blob for Encrypted Client Hello.
 
-Because this single record tells us *both* "does this origin speak H3?" and
-"which ECH config should we use?", it should be part of the early plan rather
-than retrofitted later.
-
 ### Two-source strategy
 
-| Source | When it applies | Notes |
+| Source | When it applies | Status |
 |---|---|---|
-| `android.net.dns.HttpsRecord` via `DnsResolver` | Android 36+ | Already being wired up in [square/okhttp#9383](https://github.com/square/okhttp/pull/9383) as `AndroidDnsResolverDns`. Exposes everything native including ECH. |
-| [dnsjava](https://github.com/dnsjava/dnsjava) `HTTPSRecord` / `SVCBRecord` | Older Android, JVM, anywhere without platform DNS-over-TLS | Pure-Java parser; we issue the HTTPS-type DNS query (via DoH using `okhttp-dnsoverhttps`, or plain UDP via dnsjava) and deserialize the record. |
+| `android.net.dns.HttpsRecord` via `DnsResolver` | Android 36+ | ⏳ Tracked for integration with [square/okhttp#9383](https://github.com/square/okhttp/pull/9383)'s `AndroidDnsResolverDns`. |
+| `android.net.DnsResolver.query(type = HTTPS)` | Android 29–35 | ⏳ Would fix the Android instrumentation gap below. |
+| [dnsjava](https://github.com/dnsjava/dnsjava) `HTTPSRecord` / `SVCBRecord` | JVM | ✅ `DnsJavaHttpsServiceRecordResolver`. |
 
-### Minimal internal API
+### Current API
 
 ```kotlin
 data class HttpsServiceRecord(
@@ -213,68 +281,51 @@ data class HttpsServiceRecord(
 )
 
 interface HttpsServiceRecordResolver {
-  suspend fun lookup(hostname: String): List<HttpsServiceRecord>
+  fun lookup(hostname: String): List<HttpsServiceRecord>
+  companion object { val DEFAULT: HttpsServiceRecordResolver = DnsJavaHttpsServiceRecordResolver() }
 }
+
+/** Dns + HttpsAware: issues A/AAAA + HTTPS queries in parallel, caches the latter. */
+class HttpsAwareDns(
+  private val delegate: Dns = Dns.SYSTEM,
+  private val resolver: HttpsServiceRecordResolver = HttpsServiceRecordResolver.DEFAULT,
+  private val httpsLookupTimeoutMillis: Long = 500,
+) : Dns, HttpsAware
 ```
 
-Implementations:
-- `AndroidDnsResolverHttpsServiceRecordResolver` — Android 36+.
-- `DnsJavaHttpsServiceRecordResolver` — everywhere else; uses dnsjava's
-  `HTTPSRecord` parser over either a UDP resolver or DoH via
-  `okhttp-dnsoverhttps`.
+### Android gap
 
-### Stage plan with HTTPS records in the loop
+dnsjava's raw UDP/53 queries are blocked inside the Android app sandbox — the
+instrumentation test confirms `getHttpsServiceRecord(...)` consistently
+returns `null` on-device. The fix is to plug in `android.net.DnsResolver.query`
+(API 29+) or `android.net.dns.HttpsRecord` (API 36+) as a platform-aware
+resolver. That's a separate module or build-variant split (Android-specific
+resolver) — tracked but deliberately out of the POC scope.
 
-- **Stage 1** (this module): no discovery. Caller adds `Quiche4jInterceptor`
-  because they know the origin speaks H3.
-- **Stage 1.5** (done in this module): two opt-in paths:
-  1. `Quiche4jInterceptor.Builder.httpsServiceRecordResolver(...)` — explicit
-     resolver; the interceptor calls it inline.
-  2. `.dns(HttpsAwareDns(...))` on the `OkHttpClient` — a `Dns` wrapper that
-     fires the HTTPS record lookup in parallel with the A/AAAA lookup and
-     implements `HttpsAware` so the interceptor can read the cached result.
-     Preferred: one DNS query serves both code paths. Mirrors PR 9383's
-     `AndroidDnsResolverDns` on Android 36.
+### Decision precedence (implemented)
 
-  In either case: if no record advertises `"h3"`, the interceptor calls
-  `chain.proceed(request)` and OkHttp's H/1.1 or H/2 stack handles the
-  request. `ipAddressHints`, `port`, and `targetName` from the record are
-  still unused (tracked for Stage 2 route planning).
-- **Stage 2**: the resolver moves into `RealRoutePlanner` so it governs all
-  protocol selection — H3 vs H2-over-TCP races only fire when the HTTPS
-  record advertises both.
-- **Stage 3**: `echConfigList` pairs with ECH support (PR 9383's
-  `EchAware` / `EchConfig` surface) and is passed through to the quiche TLS
-  config — requires an upstream quiche4j JNI addition to set
-  `quiche_config_set_ech_config_list`.
-
-### Behavior when the record is missing
-
-Absence of an HTTPS record doesn't mean "no H3" — many origins speak H3 but
-haven't published HTTPS records. Fallback order:
 1. An explicit [`Http3Preference`](src/main/kotlin/okhttp3/quiche4j/Http3Preference.kt)
    tag on the request (`Force` / `ForceOff` / `Current`). Highest priority —
    bypasses all discovery.
-2. Use HTTPS record if present and `alpnIds` contains `"h3"`.
-3. Use an Alt-Svc cache populated from prior H1/H2 responses on the same
-   origin.
-4. Skip H3 for this request.
+2. HTTPS record advertises `"h3"`.
+3. Alt-Svc cache has an unexpired `h3` entry for this origin.
+4. No discovery configured at all → use H/3 (caller opted in by adding the interceptor).
+5. Otherwise fall through to OkHttp's standard stack.
 
-Alt-Svc caching is wired in the current module via
-[`AltSvcCache`](src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt) — an
-interface with a default [`InMemoryAltSvcCache`][mem] and
-[`snapshot`][snap] / [`load`][load] hooks for serializable implementations
-(persist to disk, share across processes). The interceptor reads the cache
-on every call and writes to it after every response (H/1.1, H/2, or H/3)
-by parsing the `Alt-Svc` header, so an origin that "upgrades" mid-session
-is preferred via H/3 on the next connect without the caller doing
-anything.
+`ipAddressHints`, `port`, and `targetName` from the HTTPS record are **not
+yet** consumed — tracked for Stage 2 route planning.
 
-[mem]: src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt
-[snap]: src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt
-[load]: src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt
+## Alt-Svc caching (RFC 7838) — ✅ wired
 
-## Duplex requests
+[`AltSvcCache`](src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt) is an
+interface with a default in-memory implementation and `snapshot` / `load`
+hooks for serializable implementations (persist to disk, share across
+processes). The interceptor reads the cache on every call and writes to
+it after every response (H/1.1, H/2, *or* H/3) by parsing the `Alt-Svc`
+header — so an origin that "upgrades" mid-session is preferred via H/3
+on the next connect without the caller doing anything.
+
+## Duplex requests — ⏳ pending
 
 OkHttp's duplex mode (`RequestBody.isDuplex() == true`, used by gRPC and
 other streaming APIs) hands the request body writer back to the caller and
@@ -312,76 +363,47 @@ What has to change for duplex:
    accept writes from whatever thread the caller provides.
 
 The existing pool design already assumes quiche calls are serialized onto
-the I/O thread, so duplex is a natural extension — not a rewrite. Main
-open question is back-pressure signalling: do we expose it via a latch or
-just spin on `sendBody` returning DONE?
+the I/O thread, so duplex is a natural extension — not a rewrite.
 
-This is blocked on the streaming `QuicBodySource` already being in place
-(done in M1) plus the pool refactor (also done), so it can land in M1.5
-alongside the HTTPS-record resolver if gRPC use cases come up, or be
-deferred to M3 if not.
+---
 
 ## Testing
 
-The interceptor has subtle moving parts (inner chain, per-connection I/O
-thread, pooled reuse, EventListener timing). The plan is explicit about
-what each layer should cover.
+### Landed
 
-### Unit + live tests (already in `src/test`)
-
-- `builder produces interceptor` — the `Builder` is well-formed.
-- `client accepts the interceptor` — `OkHttpClient.Builder.addInterceptor` works.
-- `live fetch against public h3 server with real TLS` — end-to-end request
-  against cloudflare-quic.com using the system CA bundle. Asserts
-  `Protocol.HTTP_3`, non-empty peer certificate chain, leaf CN contains
-  `cloudflare`.
-- `two sequential fetches reuse the pooled connection` — verifies
-  `Quiche4jEngine.pooledConnectionCount()` stays at 1 across two calls.
+| Test | Layer | Notes |
+|---|---|---|
+| `AltSvcTest` (7 tests) | unit | parser + `InMemoryAltSvcCache` roundtrip, expiry, `clear`, persist |
+| `builder produces interceptor` | unit | builder API shape |
+| `client accepts the interceptor` | unit | `OkHttpClient.addInterceptor` works |
+| `live fetch against public h3 server with real TLS` | JVM integration | `Protocol.HTTP_3`, leaf CN contains `cloudflare`, 3-cert chain via platform trust |
+| `two sequential fetches reuse the pooled connection` | JVM integration | `pooledConnectionCount == 1` after two calls |
+| `HttpsAwareDns advertises h3 for cloudflare` | JVM integration | real dnsjava HTTPS record → `alpnIds = [h3, h2]` |
+| `fall-through to outer chain when HTTPS record lacks h3` | unit | fake `HttpsAware` → sentinel interceptor confirms fall-through |
+| `Alt-Svc cache seeded after a successful H3 fetch` | JVM integration | cloudflare's `Alt-Svc: h3=":443"; ma=…` populates cache |
+| `seeded Alt-Svc drives h3 decision without HTTPS-record resolver` | JVM integration | cache overrides an HttpsAware that says "h2 only" |
+| `Http3Preference ForceOff/Force/Current` (3 tests) | JVM integration | per-request override, including `Force.fallback` recover + propagate |
+| `Http3Preference Force with fallback recovers when H3 fails` | JVM integration | 1s `connectTimeout` + unreachable UDP port → falls through, gets H/2 |
+| `h3FetchAgainstCloudflareQuic` | Android (Pixel 10a + Pixel_4 emulator) | real H/3 fetch from Android; cert chain verified via platform TM |
+| `explicitForcePreferenceUsesQuiche4j` | Android | `Force()` bypasses discovery |
 
 ### Required before M1 ships
 
-- **`CacheInterceptor` directly covered.** Today our test passes through the
-  inner chain but doesn't assert caching actually happened. Add:
-  - `cached response is served from CacheInterceptor on second fetch` — first
-    call hits the network (with appropriate `cache-control` header), second
-    returns `response.cacheResponse != null`, `response.networkResponse == null`.
-    Asserts that `CacheInterceptor` in the **nested** chain is the one
-    serving the hit, not OkHttp's outer chain.
-  - `cacheMiss then conditional hit on 304` — exercises `If-None-Match` /
-    304 path through the nested `CacheInterceptor`.
+- **`CacheInterceptor` direct coverage.** Today the inner chain runs but the
+  tests don't assert `response.cacheResponse != null` on a conditional hit.
+  - `cached response is served from CacheInterceptor on second fetch`
+  - `cacheMiss then conditional hit on 304`
 - **Container test with an H/3 MockServer-equivalent.** MockServer itself
-  doesn't speak QUIC, so we run **Caddy 2.x** in a testcontainer with a
-  trivial `Caddyfile` that serves static responses over HTTPS + HTTP/3.
-  The container test module (`:container-tests`) already has the
-  `testcontainers` plumbing we can lean on. Sketch:
-  ```kotlin
-  @Testcontainers
-  class Quiche4jCaddyTest {
-    @Container
-    val caddy = GenericContainer(DockerImageName.parse("caddy:2"))
-      .withExposedPorts(443, 443/udp)
-      .withClasspathResourceMapping("Caddyfile", "/etc/caddy/Caddyfile", READ_ONLY)
-      .withClasspathResourceMapping("cert.pem", "/etc/caddy/cert.pem", READ_ONLY)
-      .withClasspathResourceMapping("key.pem", "/etc/caddy/key.pem", READ_ONLY)
-  }
-  ```
-  The test pins the self-signed cert via `Quiche4jInterceptor.Builder.trustedCaPemFile(...)`.
-  Benefits: no external network dependency, covers the request-body path we
-  can't easily hit against Cloudflare's edge.
-- **Android instrumentation test** (`:android-test`). The module already
-  runs ALPN / TLS / cert-pinning tests on real Android devices; adding
-  H/3 is a natural fit. Blockers to solve first:
-  1. **Cross-compile quiche4j-jni for Android ABIs.** Currently only
-     `linux-x86_64` is built. Need `aarch64-linux-android`,
-     `x86_64-linux-android`, `armv7-linux-androideabi`. Simplest path:
-     `cargo-ndk` driven from the same Gradle `CargoBuild` task.
-  2. **AAR packaging.** `NativeUtils` looks for
-     `/native-libs/{platform}/libquiche_jni.so` on the JVM classpath.
-     Android expects `jniLibs/<abi>/libquiche_jni.so` inside the AAR.
-     A small Gradle Android-library wrapper re-homes the `.so`s.
-  3. **Test itself**: one request to cloudflare-quic.com (emulator.wtf has
-     network access), assert `Protocol.HTTP_3` and a non-empty cert chain,
-     same shape as the JVM live test.
+  doesn't speak QUIC; run **Caddy 2.x** in a testcontainer with a trivial
+  `Caddyfile` that serves static responses over HTTPS + HTTP/3. The
+  `:container-tests` module already has the `testcontainers` plumbing.
+  Pins the self-signed cert via a per-test `X509TrustManager` on the
+  `OkHttpClient.Builder`. Benefits: no external network dependency,
+  covers the request-body path we can't easily hit against Cloudflare's
+  edge.
+- **Android HTTPS-record resolver** — swap dnsjava for
+  `android.net.DnsResolver.query(type = HTTPS)` so the Android test's
+  HttpsAware-discovery path can be covered.
 
 ### Nice-to-have
 
@@ -394,44 +416,73 @@ what each layer should cover.
 - **Large response streaming.** Body > 10 MiB; monitor heap so we're
   actually streaming (not silently buffering).
 
+---
+
 ## Upstream quiche4j changes
 
-Already landed in the [fork](https://github.com/yschimke/quiche4j) (branch
-`gradle-build`):
+### Already landed in the [fork](https://github.com/yschimke/quiche4j/tree/gradle-build)
 
-- Fixed `quiche_h3_send_request` JNI binding — was declared `long` on the
-  Java side but had no return type in Rust, so stream IDs were
-  uninitialized-stack garbage.
-- Added `Native.quiche_config_load_verify_locations_from_file` and
-  `..._from_directory`, plus `ConfigBuilder.loadVerifyLocationsFromFile` /
-  `loadVerifyLocationsFromDirectory`, so the Java side can point quiche at
-  a system CA bundle. `Quiche4jEngine` auto-probes common Linux/macOS paths
-  (`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`,
-  `/etc/ssl/cert.pem`, `/etc/ssl/certs`) so real TLS verification works with
-  no caller configuration.
+- Gradle build with configuration caching (replaces the Maven build), plus
+  `buildSrc/CargoBuild` and `CargoNdkBuild` `@CacheableTask`s for the Rust
+  side.
+- Android ABI cross-compile via cargo-ndk
+  (`-PandroidAbis=arm64-v8a,x86_64,armeabi-v7a,x86`); .so files land at
+  `lib/<abi>/libquiche_jni.so` in the JAR so AGP extracts them into the APK
+  directly.
+- JNI fix: `quiche_h3_send_request` was declared `long` on the Java side but
+  returned nothing on the Rust side; stream IDs were uninitialized-stack
+  garbage. Now returns the proper id (or an h3 error code).
+- JNI fix: `Quiche.connect`'s Java-side error check
+  (`ptr <= ErrorCode.SUCCESS`) flagged any `jlong` with bit 63 set as an
+  error — legitimate arm64 heap addresses under ASLR. Narrowed to the
+  small-negative error-code range; `ConnectionFailureException` now
+  includes the value in its message.
+- New JNI: `quiche_config_load_verify_locations_from_file` and
+  `..._from_directory`, plus Java `ConfigBuilder` wrappers (retained for
+  callers that want quiche's own verification path, though the okhttp
+  transport disables it and verifies in Java).
+- New JNI: `quiche_conn_peer_cert_chain` (returns `byte[][]` of DER-encoded
+  certs) and `quiche_conn_application_proto` (negotiated ALPN).
+- `NativeUtils`: on Android, fail fast with a descriptive error instead of
+  retrying `System.loadLibrary` and silently swallowing `copyFileFromJAR`'s
+  `IOException`.
 
-Tracked as follow-ups:
+### Tracked as follow-ups
 
-- Expose the peer certificate chain so we can fully populate `Handshake`.
-- Expose cipher suite and TLS version as enums compatible with OkHttp.
-- Expose `streamShutdown(streamId, ...)`.
-- Expose `conn.timeoutNanos()` for a proper monotonic timer wheel.
-- Expose ECH config loading (`quiche_config_set_ech_config_list`) so the
-  HTTPS-record `echConfigList` from Stage 3 can be fed in.
+Most of these are "the upstream quiche Rust API has it, we just haven't
+added the JNI binding + Java wrapper yet" — i.e. the same pattern as the
+already-landed `peer_cert_chain` and `application_proto` bindings.
+
+- **Cipher suite + TLS version enums.** quiche exposes TLS parameters
+  through stats / connection state; we'd add JNI bindings and map to
+  OkHttp's `CipherSuite` / `TlsVersion`. Today the `Handshake` we build
+  is pinned to `TLS_1_3 / TLS_AES_128_GCM_SHA256`.
+- **`streamShutdown(streamId, ...)`.** Available in quiche as
+  `Connection::stream_shutdown`; add a JNI binding. Needed for proper
+  `Call.cancel()`.
+- **`conn.timeoutNanos()`.** Available as `Connection::timeout()`; add a
+  JNI binding so we can move off `soTimeout`-based polling to a proper
+  monotonic timer wheel.
+- **ECH support.** quiche 0.26.1 does **not** expose a native ECH API. It
+  does expose `Config::with_boring_ssl_ctx_builder` which lets us pass a
+  pre-configured BoringSSL context, and BoringSSL has
+  `SSL_set1_ech_config_list`. So the path is: add a JNI binding that
+  accepts a Java-side callback or config bytes and routes them into the
+  underlying `SslContextBuilder`, then feed `HttpsServiceRecord.echConfigList`
+  through. If quiche upstream adds a first-class ECH API, we use that
+  instead.
+
+---
 
 ## Milestones
 
-| M | Scope | Disruption |
-|---|---|---|
-| M1 | This module: `Quiche4jInterceptor` + inner-chain caching + engine + live fetch against a public H3 endpoint | None in core |
-| M1.5 | HTTPS service record discovery via dnsjava (and Android 36's native `HttpsRecord` on new platforms); opt-in fall-through to H1/H2 when `alpnIds` doesn't contain `"h3"` | None in core |
-| M2 | Upstream quiche4j work; fully populate `Handshake`; Alt-Svc cache | None in core |
-| M3 | Stage 2 core refactor: extract `Carrier`, add `Http3ExchangeCodec`, route planning wired through the HTTPS-record resolver | Internal-only OkHttp changes |
-| M4 | Stage 2 API polish: `quicEngineFactory` slot, optional `altSvcDiscovered` event | Additive |
-| M5 (5.x → 6.0) | Stage 3: Handshake transport field, ECH via HTTPS-record `echConfigList`, AsyncInterceptor, WebTransport, migration, 0-RTT | Breaking |
-
-Testing milestones woven into the above:
-- **M1-T1** (blocks M1): direct `CacheInterceptor` coverage + Caddy container
-  test covering request body + large body.
-- **M1-T2** (blocks M1): Android-ABI cross-compile in quiche4j-jni and an
-  `:android-test` live H/3 fetch.
+| M | Scope | Status | Disruption |
+|---|---|---|---|
+| **M1** | This module: `Quiche4jInterceptor` + inner-chain caching + pooled engine + live fetch against a public H3 endpoint | ✅ feature-complete as POC | None in core |
+| **M1-T1** | Direct `CacheInterceptor` coverage + Caddy container test | ⏳ blocks shipping M1 | None in core |
+| **M1-T2** | Android-ABI cross-compile in quiche4j-jni and an `:android-test` live H/3 fetch | ✅ | None in core |
+| **M1.5** | HTTPS service record discovery (dnsjava today; Android 29+ via `DnsResolver.query` and Android 36's native `HttpsRecord` tracked); Alt-Svc cache; per-request `Http3Preference` tag | ✅ JVM / 🚧 Android resolver | None in core |
+| **M2** | Upstream quiche4j: cipher/TLS-version enums, `streamShutdown`, `timeoutNanos`, cancellation wiring | ⏳ | None in core |
+| **M3** | Stage 2 core refactor: extract `Carrier`, add `Http3ExchangeCodec`, route planning wired through the HTTPS-record resolver | ⏳ | Internal-only OkHttp changes |
+| **M4** | Stage 2 API polish: `quicEngineFactory` slot, optional `altSvcDiscovered` event | ⏳ | Additive |
+| **M5 (5.x → 6.0)** | Stage 3: `Handshake` transport field, ECH via HTTPS-record `echConfigList`, AsyncInterceptor SPI, WebTransport, migration, 0-RTT | ⏳ | Breaking |
