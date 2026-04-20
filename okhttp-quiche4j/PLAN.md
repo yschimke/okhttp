@@ -61,11 +61,14 @@ val client = OkHttpClient.Builder()
 - `networkResponse`, `cacheResponse`, `priorResponse` on the returned
   `Response` are set by the nested chain only when applicable
   (cache hits/conditional hits produce `cacheResponse`).
-- `RequestBody.isDuplex() == true` is unsupported.
+- `RequestBody.isDuplex() == true` is unsupported — see [duplex requests][]
+  below for the plan.
 - Response body is drained to memory (no streaming `okio.Source` yet).
 - No connection pooling — each call gets its own `DatagramSocket` and QUIC
   connection.
 - No Alt-Svc discovery or HTTPS-record resolution yet (see next section).
+
+[duplex requests]: #duplex-requests
 - No HTTP CONNECT proxy (UDP doesn't tunnel through HTTP CONNECT). Direct
   connections only.
 - No WebSocket.
@@ -247,6 +250,53 @@ haven't published HTTPS records. Fallback order:
    origin.
 3. Use an explicit `Request.tag(Protocol.HTTP_3)` caller hint.
 4. Skip H3 for this request.
+
+## Duplex requests
+
+OkHttp's duplex mode (`RequestBody.isDuplex() == true`, used by gRPC and
+other streaming APIs) hands the request body writer back to the caller and
+lets it interleave with response reads. A duplex exchange can read a byte
+of response before finishing the request body — the two halves are
+genuinely concurrent.
+
+Today's `Quiche4jCallServer` cannot do this: `intercept()` writes the
+request body in one shot (`body.writeTo(buffer); sendBody(…, fin=true)`)
+and only then waits for response headers. The caller has no writer handle,
+and even if they did, the call thread is the only thread driving the
+pipeline for that exchange.
+
+What has to change for duplex:
+
+1. **Writes happen on the I/O thread, not the caller's.** `Quiche4jCallServer`
+   submits `sendBody` tasks to `QuicPooledConnection`'s task queue (same
+   serialization guarantee as everything else that touches quiche), driven
+   by writes the caller makes to a `QuicRequestBodySink` (okio `Sink`).
+   This is the symmetric counterpart of the existing `QuicBodySource` on
+   the response side.
+2. **Return headers before the request body completes.** `intercept()`
+   returns as soon as `headersFuture` resolves. The caller then writes
+   their duplex body into the sink while also reading the response body
+   from the source — two independent streams over the same `QuicStream`.
+3. **Flow control.** `sendBody` can return short writes; the sink must
+   block / park until `STREAM_DATA_BLOCKED` clears. Simplest: the I/O thread
+   re-drives pending sink writes each loop iteration after receiving
+   packets.
+4. **FIN on close.** `QuicRequestBodySink.close()` schedules a final
+   `sendBody(..., fin=true)` onto the I/O thread.
+5. **`chain.request().body!!.writeTo(sink)` runs on a worker thread** —
+   caller code expects a blocking sink, so OkHttp dispatches duplex writes
+   on a Dispatcher thread. We don't need our own thread pool; we just
+   accept writes from whatever thread the caller provides.
+
+The existing pool design already assumes quiche calls are serialized onto
+the I/O thread, so duplex is a natural extension — not a rewrite. Main
+open question is back-pressure signalling: do we expose it via a latch or
+just spin on `sendBody` returning DONE?
+
+This is blocked on the streaming `QuicBodySource` already being in place
+(done in M1) plus the pool refactor (also done), so it can land in M1.5
+alongside the HTTPS-record resolver if gRPC use cases come up, or be
+deferred to M3 if not.
 
 ## Testing
 
