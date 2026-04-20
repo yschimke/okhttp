@@ -14,11 +14,15 @@ sockets, TLS configuration, pooling, and timers.
 
 ## Status at a glance
 
-**Stage 1 is feature-complete as a POC.** Live H/3 fetches work on the JVM
-and on Android (emulator + real Pixel 10a hardware) against public H/3
-endpoints, with TLS verified through the OkHttpClient's own
-`X509TrustManager` + `HostnameVerifier`. 20 JVM unit/integration tests
-pass; 2 live instrumentation tests pass on a real device.
+**Stage 1 is feature-complete as a POC.** Live H/3 fetches work on the JVM,
+in a Dockerized Caddy 2 container, on the Android emulator, and on real
+Pixel 10a hardware, against both public endpoints and a self-signed local
+server. TLS is verified through the OkHttpClient's own `X509TrustManager`
++ `HostnameVerifier`. Cancellation is push-based (no polling). Caching
+wires through the real `CacheInterceptor`, including 304 revalidation.
+
+24 JVM unit/integration tests pass · 1 Caddy container test passes ·
+2 live instrumentation tests pass on a real device.
 
 Legend: ✅ done · 🚧 in progress · ⏳ pending / out of POC scope.
 
@@ -41,10 +45,10 @@ Legend: ✅ done · 🚧 in progress · ⏳ pending / out of POC scope.
 | Android ABI cross-compile (`cargo-ndk`) | ✅ | `./gradlew :quiche4j-jni:jar -PandroidAbis=arm64-v8a,x86_64` |
 | Android instrumentation test (`Quiche4jAndroidTest`) | ✅ | `h3FetchAgainstCloudflareQuic`, `explicitForcePreferenceUsesQuiche4j` green on Pixel 10a |
 | EventListener coverage (dns/connect/secureConnect/headers/body/connection) | ✅ | matches the table in the per-request flow below |
-| `CacheInterceptor` direct tests (cache hit / conditional 304) | ⏳ | M1-T1 |
-| Caddy container test (H/3 + upload path) | ⏳ | M1-T1 |
-| Android HTTPS-record resolver via `android.net.DnsResolver` | ⏳ | dnsjava's UDP/53 queries are blocked in the Android sandbox; see test's kdoc |
-| Cancellation polling (`Call.cancel()` tears down QUIC stream) | ⏳ | |
+| `CacheInterceptor` direct tests (cache hit / conditional 304) | ✅ | `Quiche4jCacheTest` — primes cache via MockWebServer, reads via Quiche4jInterceptor with a stub terminal that asserts it isn't reached on hit |
+| Caddy container test (local H/3 server, full round trip) | ✅ | `CaddyQuiche4jTest` in `:container-tests`, runs with `-PcontainerTests=true` |
+| Android HTTPS-record resolver (`android.net.DnsResolver`, API 29+) | ✅ | `AndroidHttpsServiceRecordResolver` in `:android-test` — raw DNS query + dnsjava parser |
+| Push-based cancellation (`Call.cancel()` tears down QUIC stream) | ✅ | `CancellationHook` via `Call.addEventListener`; no polling |
 | Duplex request body (`RequestBody.isDuplex() == true`) | ⏳ | design in [Duplex requests](#duplex-requests); pool already serialises quiche correctly so it's additive |
 | HTTP CONNECT proxy | ⏳ | UDP doesn't tunnel; MASQUE (RFC 9298) is Stage-3 |
 | WebSocket | ⏳ | out of H/3 scope |
@@ -293,14 +297,19 @@ class HttpsAwareDns(
 ) : Dns, HttpsAware
 ```
 
-### Android gap
+### Android resolver
 
-dnsjava's raw UDP/53 queries are blocked inside the Android app sandbox — the
-instrumentation test confirms `getHttpsServiceRecord(...)` consistently
-returns `null` on-device. The fix is to plug in `android.net.DnsResolver.query`
-(API 29+) or `android.net.dns.HttpsRecord` (API 36+) as a platform-aware
-resolver. That's a separate module or build-variant split (Android-specific
-resolver) — tracked but deliberately out of the POC scope.
+dnsjava's raw UDP/53 queries are blocked inside the Android app sandbox.
+The fix lives in `:android-test` as
+[`AndroidHttpsServiceRecordResolver`](../../android-test/src/androidTest/java/okhttp/android/test/quiche4j/AndroidHttpsServiceRecordResolver.kt):
+it uses `android.net.DnsResolver.rawQuery(...)` (API 29+) to fetch the
+type-65 DNS answer bytes and dnsjava's `Message` + `HTTPSRecord` parsers
+to decode them. Works inside the sandbox; no extra permissions.
+
+To ship this as part of the main module we'd need to split `okhttp-quiche4j`
+into JVM + Android variants (or introduce a sibling `okhttp-quiche4j-android`
+AAR) — the current single JVM module can't `import android.net.DnsResolver`
+at compile time. Tracked; keeps Stage 1 simple.
 
 ### Decision precedence (implemented)
 
@@ -446,6 +455,9 @@ the I/O thread, so duplex is a natural extension — not a rewrite.
 - `NativeUtils`: on Android, fail fast with a descriptive error instead of
   retrying `System.loadLibrary` and silently swallowing `copyFileFromJAR`'s
   `IOException`.
+- New JNI: `quiche_conn_stream_shutdown(streamId, direction, err)` returns
+  an `int` status (was previously a void stub that `panic!`-ed on error).
+  Powers the push-based cancellation path in the transport.
 
 ### Tracked as follow-ups
 
@@ -453,16 +465,14 @@ Most of these are "the upstream quiche Rust API has it, we just haven't
 added the JNI binding + Java wrapper yet" — i.e. the same pattern as the
 already-landed `peer_cert_chain` and `application_proto` bindings.
 
-- **Cipher suite + TLS version enums.** quiche exposes TLS parameters
-  through stats / connection state; we'd add JNI bindings and map to
-  OkHttp's `CipherSuite` / `TlsVersion`. Today the `Handshake` we build
-  is pinned to `TLS_1_3 / TLS_AES_128_GCM_SHA256`.
-- **`streamShutdown(streamId, ...)`.** Available in quiche as
-  `Connection::stream_shutdown`; add a JNI binding. Needed for proper
-  `Call.cancel()`.
 - **`conn.timeoutNanos()`.** Available as `Connection::timeout()`; add a
   JNI binding so we can move off `soTimeout`-based polling to a proper
   monotonic timer wheel.
+- **Cipher suite + TLS version enums.** Not available in quiche 0.26.1's
+  public Rust API at all — `handshake.cipher()` is on a private field. So
+  this needs an upstream quiche PR adding a `Connection::cipher()` (or
+  similar) first, and then a JNI binding here. Today the `Handshake` we
+  build is pinned to `TLS_1_3 / TLS_AES_128_GCM_SHA256`.
 - **ECH support.** quiche 0.26.1 does **not** expose a native ECH API. It
   does expose `Config::with_boring_ssl_ctx_builder` which lets us pass a
   pre-configured BoringSSL context, and BoringSSL has
@@ -479,10 +489,10 @@ already-landed `peer_cert_chain` and `application_proto` bindings.
 | M | Scope | Status | Disruption |
 |---|---|---|---|
 | **M1** | This module: `Quiche4jInterceptor` + inner-chain caching + pooled engine + live fetch against a public H3 endpoint | ✅ feature-complete as POC | None in core |
-| **M1-T1** | Direct `CacheInterceptor` coverage + Caddy container test | ⏳ blocks shipping M1 | None in core |
+| **M1-T1** | Direct `CacheInterceptor` coverage (hit + 304) + Caddy container test | ✅ | None in core |
 | **M1-T2** | Android-ABI cross-compile in quiche4j-jni and an `:android-test` live H/3 fetch | ✅ | None in core |
-| **M1.5** | HTTPS service record discovery (dnsjava today; Android 29+ via `DnsResolver.query` and Android 36's native `HttpsRecord` tracked); Alt-Svc cache; per-request `Http3Preference` tag | ✅ JVM / 🚧 Android resolver | None in core |
-| **M2** | Upstream quiche4j: cipher/TLS-version enums, `streamShutdown`, `timeoutNanos`, cancellation wiring | ⏳ | None in core |
+| **M1.5** | HTTPS service record discovery (dnsjava on JVM + `DnsResolver`-backed resolver for Android 29+); Alt-Svc cache; per-request `Http3Preference` tag; push-based cancellation via `Call.addEventListener` | ✅ (Android resolver lives in `:android-test` until the module gains a JVM/Android variant split) | None in core |
+| **M2** | Upstream quiche4j: `timeoutNanos`, cipher/TLS-version enums (needs quiche PR first), ECH config plumbing | ⏳ | None in core |
 | **M3** | Stage 2 core refactor: extract `Carrier`, add `Http3ExchangeCodec`, route planning wired through the HTTPS-record resolver | ⏳ | Internal-only OkHttp changes |
 | **M4** | Stage 2 API polish: `quicEngineFactory` slot, optional `altSvcDiscovered` event | ⏳ | Additive |
 | **M5 (5.x → 6.0)** | Stage 3: `Handshake` transport field, ECH via HTTPS-record `echConfigList`, AsyncInterceptor SPI, WebTransport, migration, 0-RTT | ⏳ | Breaking |
