@@ -105,6 +105,10 @@ internal class Quiche4jCallServer(
         if (hasBody) Buffer().also { request.body!!.writeTo(it) }.readByteArray() else null
       if (hasBody) eventListener.requestBodyStart(call)
       stream = pooled.openStream(reqHeaders, body)
+      // Push-based cancellation: Call.addEventListener composes an extra EventListener onto
+      // the call without disturbing the OkHttpClient's. As soon as RealCall.cancel() fires
+      // EventListener.canceled, we tear down the QUIC stream — no polling thread needed.
+      CancellationHook.attach(call) { pooled.cancelStream(stream) }
       eventListener.requestHeadersEnd(call, request)
       if (hasBody) eventListener.requestBodyEnd(call, (body?.size ?: 0).toLong())
 

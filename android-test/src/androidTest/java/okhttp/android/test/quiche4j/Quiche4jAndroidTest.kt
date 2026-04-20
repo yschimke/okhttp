@@ -14,11 +14,14 @@ import assertk.assertThat
 import assertk.assertions.contains
 import assertk.assertions.isEqualTo
 import assertk.assertions.isNotEmpty
+import assertk.assertions.isNotNull
 import java.security.cert.X509Certificate
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.quiche4j.Http3Preference
+import okhttp3.quiche4j.HttpsAware
+import okhttp3.quiche4j.HttpsAwareDns
 import okhttp3.quiche4j.Quiche4jInterceptor
 import org.junit.jupiter.api.Test
 
@@ -53,17 +56,32 @@ class Quiche4jAndroidTest {
     }
   }
 
-  /**
-   * HTTPS-record discovery via the default [HttpsAwareDns] (dnsjava over UDP/53) does not
-   * work inside the Android app sandbox: `dns.getHttpsServiceRecord(...)` consistently
-   * returns null on the emulator because dnsjava can't reach the system resolver with a raw
-   * DNS type-65 query.
-   *
-   * Follow-up work tracked in `okhttp-quiche4j/PLAN.md`: swap in an `AndroidDnsResolverDns`-style
-   * resolver that uses `android.net.DnsResolver.query(...)` (API 29+) or
-   * `android.net.dns.HttpsRecord` (API 36+), matching the pattern prototyped in
-   * [square/okhttp#9383](https://github.com/square/okhttp/pull/9383).
-   */
+  @Test
+  fun httpsRecordDiscoveryRoutesOverQuiche4j() {
+    // Requires API 29+ — skip silently on older devices so the test module still runs there.
+    if (android.os.Build.VERSION.SDK_INT < 29) return
+    val dns =
+      HttpsAwareDns(
+        resolver = AndroidHttpsServiceRecordResolver(),
+        httpsLookupTimeoutMillis = 5_000,
+      )
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .dns(dns)
+        .addInterceptor(interceptor)
+        .build()
+    val request = Request.Builder().url("https://cloudflare-quic.com/").build()
+    client.newCall(request).execute().use { response ->
+      val record = (dns as HttpsAware).getHttpsServiceRecord("cloudflare-quic.com")
+      Log.i(tag, "discovery record alpn=${record?.alpnIds} protocol=${response.protocol}")
+      assertThat(record).isNotNull()
+      assertThat(record!!.alpnIds).contains("h3")
+      assertThat(response.protocol).isEqualTo(Protocol.HTTP_3)
+    }
+  }
+
   @Test
   fun explicitForcePreferenceUsesQuiche4j() {
     val interceptor = Quiche4jInterceptor.Builder().build()

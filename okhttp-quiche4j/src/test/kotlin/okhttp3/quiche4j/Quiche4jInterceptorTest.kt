@@ -68,6 +68,32 @@ class Quiche4jInterceptorTest {
     assertThat(second.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
   }
 
+  @Test fun `CancellationHook fires synchronously when Call dot cancel is invoked`() {
+    // The hook composes onto the Call via Call.addEventListener — Quiche4jCallServer then uses
+    // this to tear down the QUIC stream on cancellation without polling. This test pins the
+    // core mechanism: as soon as RealCall.cancel() runs, our callback runs too, on the thread
+    // that invoked cancel (no intermediate delay from a polling loop).
+    val client = OkHttpClient.Builder().build()
+    val call = client.newCall(Request.Builder().url("https://example.com/").build())
+
+    val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+    val invokingThread = java.util.concurrent.atomic.AtomicReference<Thread>()
+    CancellationHook.attach(call) {
+      fired.set(true)
+      invokingThread.set(Thread.currentThread())
+    }
+
+    call.cancel()
+
+    assertThat(fired.get()).isTrue()
+    assertThat(invokingThread.get()).isEqualTo(Thread.currentThread())
+
+    // Idempotency: a second cancel() must not re-fire the hook.
+    fired.set(false)
+    call.cancel()
+    assertThat(fired.get()).isFalse()
+  }
+
   @Test fun `Http3Preference ForceOff makes the interceptor fall through`() {
     val interceptor = Quiche4jInterceptor.Builder().build()
     val fell = java.util.concurrent.atomic.AtomicBoolean(false)

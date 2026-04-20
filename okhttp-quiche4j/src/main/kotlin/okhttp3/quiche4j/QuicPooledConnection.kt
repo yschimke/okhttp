@@ -132,6 +132,24 @@ internal class QuicPooledConnection private constructor(
     activeCount.decrementAndGet()
   }
 
+  /**
+   * Cancel an in-flight stream: send STOP_SENDING and RESET_STREAM on the I/O thread, then
+   * unblock any caller waiting on headers or body from this stream with an IOException.
+   * Idempotent — repeated calls no-op after the first.
+   */
+  fun cancelStream(stream: QuicStream) {
+    if (stream.finished) return
+    submit {
+      try {
+        conn.streamShutdown(stream.streamId, Connection.ShutdownDirection.READ, 0L)
+      } catch (_: Throwable) { /* best effort */ }
+      try {
+        conn.streamShutdown(stream.streamId, Connection.ShutdownDirection.WRITE, 0L)
+      } catch (_: Throwable) { /* best effort */ }
+    }
+    stream.deliverFailure(IOException("call was canceled"))
+  }
+
   private fun startIoThread() {
     val t =
       Thread({ ioLoop() }, "quiche4j-io-${key.host}:${key.port}").apply {

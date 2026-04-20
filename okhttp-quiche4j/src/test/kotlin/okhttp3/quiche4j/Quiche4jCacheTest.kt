@@ -116,6 +116,85 @@ class Quiche4jCacheTest {
     // invocation), which proves Quiche4jCallServer never ran.
   }
 
+  @Test fun `304 Not Modified through inner CacheInterceptor refreshes cached entry`() {
+    val body = "etag-cacheable"
+    val etag = "\"v1\""
+    // First response: cacheable with ETag but max-age=0 so the next call must revalidate.
+    server.enqueue(
+      MockResponse
+        .Builder()
+        .body(body)
+        .addHeader("Cache-Control", "max-age=0")
+        .addHeader("ETag", etag)
+        .build(),
+    )
+    // Second response: 304, no body — the cached body is returned.
+    server.enqueue(
+      MockResponse
+        .Builder()
+        .code(304)
+        .addHeader("ETag", etag)
+        .build(),
+    )
+
+    val baseClient =
+      OkHttpClient
+        .Builder()
+        .cache(cache)
+        .sslSocketFactory(
+          handshakeCertificates.sslSocketFactory(),
+          handshakeCertificates.trustManager,
+        ).build()
+
+    // Prime via normal HTTPS.
+    val url = server.url("/revalidate")
+    baseClient.newCall(Request.Builder().url(url).build()).execute().use {
+      assertThat(it.body.string()).isEqualTo(body)
+    }
+
+    // Swap in a stub terminal that simulates a revalidation H/3 call — returns 304.
+    val terminalRan = java.util.concurrent.atomic.AtomicBoolean(false)
+    val stubTerminal =
+      okhttp3.Interceptor { chain ->
+        terminalRan.set(true)
+        val sent = chain.request()
+        // Echo the conditional header back so the test can assert it was present — that's
+        // what proves CacheInterceptor inserted If-None-Match from the cache entry.
+        val ifNoneMatch = sent.header("If-None-Match")
+        okhttp3.Response
+          .Builder()
+          .request(sent)
+          .protocol(Protocol.HTTP_3)
+          .code(304)
+          .message("")
+          .addHeader("ETag", etag)
+          .apply { if (ifNoneMatch != null) addHeader("X-Observed-If-None-Match", ifNoneMatch) }
+          .body(okhttp3.ResponseBody.create(null, ""))
+          .build()
+      }
+    val interceptor =
+      Quiche4jInterceptor(
+        engine = Quiche4jEngine(),
+        httpsRecordResolver = null,
+        altSvcCache = InMemoryAltSvcCache(),
+        terminal = stubTerminal,
+      )
+    val quicheClient = baseClient.newBuilder().addInterceptor(interceptor).build()
+
+    val revalidated = quicheClient.newCall(Request.Builder().url(url).build()).execute()
+    assertThat(terminalRan.get()).isEqualTo(true)
+    // The final response code should be 200 (CacheInterceptor translated the 304 into the
+    // cached body), NOT 304.
+    assertThat(revalidated.code).isEqualTo(200)
+    assertThat(revalidated.body.string()).isEqualTo(body)
+    assertThat(revalidated.cacheResponse).isNotNull()
+    assertThat(revalidated.networkResponse).isNotNull()
+    assertThat(revalidated.networkResponse!!.code).isEqualTo(304)
+    // And the network request that was sent to our stub carried the If-None-Match header —
+    // i.e. CacheInterceptor did the conditional-request rewriting.
+    assertThat(revalidated.networkResponse!!.header("X-Observed-If-None-Match")).isEqualTo(etag)
+  }
+
   @Test fun `cache miss falls through to the terminal interceptor`() {
     val served =
       java.util.concurrent.atomic.AtomicBoolean(false)
