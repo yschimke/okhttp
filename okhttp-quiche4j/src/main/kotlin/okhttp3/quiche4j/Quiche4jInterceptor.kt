@@ -36,10 +36,16 @@ import okhttp3.internal.http.RealInterceptorChain
  *
  * See `PLAN.md` in this module for the full three-stage roadmap.
  */
-class Quiche4jInterceptor private constructor(
+class Quiche4jInterceptor internal constructor(
   internal val engine: Quiche4jEngine,
   internal val httpsRecordResolver: HttpsServiceRecordResolver?,
   val altSvcCache: AltSvcCache,
+  /**
+   * The terminal interceptor at the bottom of the inner chain — the one that actually talks
+   * QUIC. Tests replace this with a stub so they can exercise the inner
+   * [BridgeInterceptor]/[CacheInterceptor] wiring without needing an H/3 server.
+   */
+  internal val terminal: Interceptor,
 ) : Interceptor {
   /** Visible to tests: size of the pooled-connection cache. */
   internal val pooledConnectionCount: Int
@@ -116,7 +122,7 @@ class Quiche4jInterceptor private constructor(
       listOf(
         BridgeInterceptor(),
         CacheInterceptor(),
-        Quiche4jCallServer(engine),
+        terminal,
       )
 
     val innerChain =
@@ -176,6 +182,14 @@ class Quiche4jInterceptor private constructor(
      */
     fun altSvcCache(cache: AltSvcCache) = apply { this.altSvcCache = cache }
 
-    fun build(): Quiche4jInterceptor = Quiche4jInterceptor(Quiche4jEngine(), httpsRecordResolver, altSvcCache)
+    fun build(): Quiche4jInterceptor {
+      val engine = Quiche4jEngine()
+      return Quiche4jInterceptor(
+        engine = engine,
+        httpsRecordResolver = httpsRecordResolver,
+        altSvcCache = altSvcCache,
+        terminal = Quiche4jCallServer(engine),
+      )
+    }
   }
 }
