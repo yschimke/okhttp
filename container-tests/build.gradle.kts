@@ -38,6 +38,8 @@ dependencies {
   api(projects.okhttp)
 
   testImplementation(projects.okhttpTestingSupport)
+  testImplementation(projects.okhttpTls)
+  testImplementation(projects.okhttpQuiche4j)
   testImplementation(libs.junit.jupiter.api)
   testImplementation(libs.junit.jupiter.params)
   testImplementation(libs.junit.jupiter.engine)
