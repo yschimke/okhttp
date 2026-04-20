@@ -33,6 +33,7 @@ import okhttp3.internal.http.RealInterceptorChain
 class Quiche4jInterceptor private constructor(
   internal val engine: Quiche4jEngine,
   internal val httpsRecordResolver: HttpsServiceRecordResolver?,
+  val altSvcCache: AltSvcCache,
 ) : Interceptor {
   /** Visible to tests: size of the pooled-connection cache. */
   internal val pooledConnectionCount: Int
@@ -81,8 +82,24 @@ class Quiche4jInterceptor private constructor(
           }
         else -> null
       }
-    if (discoveryEnabled && record?.supportsHttp3 != true) {
-      return chain.proceed(outerRequest)
+    // Decision: prefer HTTP/3 when any of the following is true:
+    //   (a) discovery is disabled (no HTTPS-record resolver, no HttpsAware Dns, no cached
+    //       Alt-Svc) — the caller asked for HTTP/3 by adding this interceptor
+    //   (b) HTTPS record explicitly advertises h3
+    //   (c) Alt-Svc cache has an unexpired h3 entry for this origin
+    val origin = AltSvcOrigin.of(outerRequest.url)
+    val altSvcHasH3 = altSvcCache.get(origin).any { it.protocolId.equals("h3", true) }
+    val shouldHandle =
+      when {
+        !discoveryEnabled -> true
+        record?.supportsHttp3 == true -> true
+        altSvcHasH3 -> true
+        else -> false
+      }
+    if (!shouldHandle) {
+      // Fall through but still scan the response's Alt-Svc header so the *next* call can prefer
+      // HTTP/3 if the origin starts advertising it.
+      return chain.proceed(outerRequest).also { updateAltSvcFromResponse(it) }
     }
 
     val call = realChain.call
@@ -104,7 +121,21 @@ class Quiche4jInterceptor private constructor(
         request = chain.request(),
       )
 
-    return innerChain.proceed(chain.request())
+    return innerChain.proceed(chain.request()).also { updateAltSvcFromResponse(it) }
+  }
+
+  /** Inspect a completed response's `Alt-Svc` header(s) and update the cache. */
+  private fun updateAltSvcFromResponse(response: Response) {
+    val altSvc = response.headers("Alt-Svc")
+    if (altSvc.isEmpty()) return
+    val origin = AltSvcOrigin.of(response.request.url)
+    val combined = altSvc.joinToString(separator = ", ")
+    val parsed = AltSvcEntry.parseHeader(combined)
+    if (parsed.isEmpty() && combined.trim().equals("clear", ignoreCase = true)) {
+      altSvcCache.remove(origin)
+    } else if (parsed.isNotEmpty()) {
+      altSvcCache.put(origin, parsed)
+    }
   }
 
   class Builder {
@@ -114,6 +145,7 @@ class Quiche4jInterceptor private constructor(
     private var trustedCaDirectory: String? = null
     private var allowInsecure: Boolean = false
     private var httpsRecordResolver: HttpsServiceRecordResolver? = null
+    private var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
 
     /** Max QUIC idle timeout in ms before the connection is closed. Default 30s. */
     fun maxIdleTimeoutMillis(value: Long) = apply { this.maxIdleTimeoutMillis = value }
@@ -155,6 +187,13 @@ class Quiche4jInterceptor private constructor(
     fun httpsServiceRecordResolver(resolver: HttpsServiceRecordResolver?) =
       apply { this.httpsRecordResolver = resolver }
 
+    /**
+     * Set the Alt-Svc cache. Defaults to [InMemoryAltSvcCache]. Pass a persistent
+     * implementation (e.g. one that mirrors [AltSvcCache.snapshot] to disk) to survive
+     * process restarts.
+     */
+    fun altSvcCache(cache: AltSvcCache) = apply { this.altSvcCache = cache }
+
     fun build(): Quiche4jInterceptor {
       val engine =
         Quiche4jEngine(
@@ -164,7 +203,7 @@ class Quiche4jInterceptor private constructor(
           allowInsecure = allowInsecure,
           userAgent = userAgent,
         )
-      return Quiche4jInterceptor(engine, httpsRecordResolver)
+      return Quiche4jInterceptor(engine, httpsRecordResolver, altSvcCache)
     }
   }
 }

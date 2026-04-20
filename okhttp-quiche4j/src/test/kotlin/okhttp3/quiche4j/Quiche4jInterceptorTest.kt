@@ -12,6 +12,7 @@ package okhttp3.quiche4j
 import assertk.assertThat
 import assertk.assertions.contains
 import assertk.assertions.isEqualTo
+import assertk.assertions.isFalse
 import assertk.assertions.isGreaterThan
 import assertk.assertions.isNotEmpty
 import assertk.assertions.isNotNull
@@ -74,6 +75,69 @@ class Quiche4jInterceptorTest {
     println("pool after first=$afterFirst after second=$afterSecond")
     assertThat(afterSecond).isEqualTo(1) // same entry — pooling worked
     assertThat(second.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
+  }
+
+  @Test fun `Alt-Svc cache seeded after a successful H3 fetch`() {
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .addInterceptor(interceptor)
+        .build()
+    val request = Request.Builder().url("https://cloudflare-quic.com/").build()
+    client.newCall(request).execute().close()
+
+    val origin = AltSvcOrigin("https", "cloudflare-quic.com", 443)
+    val cached = interceptor.altSvcCache.get(origin)
+    println("alt-svc cache entries=${cached.map { "${it.protocolId}=:${it.port}" }}")
+    assertThat(cached).isNotEmpty()
+    assertThat(cached.any { it.protocolId.equals("h3", ignoreCase = true) }).isTrue()
+  }
+
+  @Test fun `seeded Alt-Svc drives h3 decision without HTTPS-record resolver`() {
+    val cache = InMemoryAltSvcCache()
+    // Pre-seed with an h3 entry — simulates "we learned this on a prior call".
+    cache.put(
+      AltSvcOrigin("https", "cloudflare-quic.com", 443),
+      listOf(AltSvcEntry("h3", "", 443, System.currentTimeMillis() + 60_000)),
+    )
+    // Register a sentinel downstream interceptor so we can tell if the outer chain was used.
+    val fellThrough = java.util.concurrent.atomic.AtomicBoolean(false)
+    val interceptor =
+      Quiche4jInterceptor
+        .Builder()
+        .altSvcCache(cache)
+        // An HttpsAware Dns that always says "no h3" — without Alt-Svc this would force
+        // fall-through. With Alt-Svc seeded, Quiche4jInterceptor should still pick h3.
+        .build()
+    val noH3Dns =
+      object : okhttp3.Dns, HttpsAware {
+        override fun lookup(hostname: String) = okhttp3.Dns.SYSTEM.lookup(hostname)
+
+        override fun getHttpsServiceRecord(hostname: String) =
+          HttpsServiceRecord(
+            priority = 1,
+            targetName = ".",
+            port = null,
+            alpnIds = listOf("h2"),
+            ipAddressHints = emptyList(),
+            echConfigList = null,
+          )
+      }
+    val client =
+      OkHttpClient
+        .Builder()
+        .dns(noH3Dns)
+        .addInterceptor(interceptor)
+        .addInterceptor { c ->
+          fellThrough.set(true)
+          c.proceed(c.request())
+        }.build()
+    val request = Request.Builder().url("https://cloudflare-quic.com/").build()
+    client.newCall(request).execute().use { resp ->
+      assertThat(fellThrough.get()).isFalse()
+      assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
+    }
   }
 
   @Test fun `fall-through to outer chain when HTTPS record lacks h3`() {

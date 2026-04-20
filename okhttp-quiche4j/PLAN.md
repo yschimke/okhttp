@@ -258,6 +258,20 @@ haven't published HTTPS records. Fallback order:
 3. Use an explicit `Request.tag(Protocol.HTTP_3)` caller hint.
 4. Skip H3 for this request.
 
+Alt-Svc caching is wired in the current module via
+[`AltSvcCache`](src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt) — an
+interface with a default [`InMemoryAltSvcCache`][mem] and
+[`snapshot`][snap] / [`load`][load] hooks for serializable implementations
+(persist to disk, share across processes). The interceptor reads the cache
+on every call and writes to it after every response (H/1.1, H/2, or H/3)
+by parsing the `Alt-Svc` header, so an origin that "upgrades" mid-session
+is preferred via H/3 on the next connect without the caller doing
+anything.
+
+[mem]: src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt
+[snap]: src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt
+[load]: src/main/kotlin/okhttp3/quiche4j/AltSvcCache.kt
+
 ## Duplex requests
 
 OkHttp's duplex mode (`RequestBody.isDuplex() == true`, used by gRPC and
