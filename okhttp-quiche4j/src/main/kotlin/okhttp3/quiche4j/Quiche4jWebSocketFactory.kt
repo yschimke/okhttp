@@ -9,6 +9,7 @@
  */
 package okhttp3.quiche4j
 
+import java.util.concurrent.Executor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.WebSocket
@@ -16,84 +17,78 @@ import okhttp3.WebSocketListener
 
 /**
  * A [WebSocket.Factory] that opens WebSockets over HTTP/3 using the quiche4j transport
- * (RFC 9220 extended CONNECT on an HTTP/3 stream). Falls back to a user-supplied
- * [WebSocket.Factory] — typically an [OkHttpClient] — for cases where HTTP/3 can't be
- * used: plaintext `ws://`, [Http3Preference.ForceOff], handshake failure on
- * `Http3Preference.Force(fallback = true)` or the default, etc.
+ * (RFC 9220 extended CONNECT on an HTTP/3 stream).
  *
- * Unlike [OkHttpClient.newWebSocket], this implementation performs the extended-CONNECT
- * handshake **synchronously** inside [newWebSocket]. That is intentional: a blocking
- * handshake lets us decide whether to use the HTTP/3 stream or the fallback before
- * returning, without needing an "upgrade-in-flight" proxy wrapper. Callers that require
- * async behaviour should wrap [newWebSocket] in their own executor.
+ * This factory is deliberately **HTTP/3-only** — there is no built-in fallback to
+ * HTTP/1.1. If you need the "try H/3 first, fall back to H/1.1 on connect failure"
+ * behaviour, compose this factory with an [OkHttpClient] (itself a [WebSocket.Factory])
+ * via [FailoverWebSocketFactory]:
  *
- * Typical wiring:
  * ```kotlin
- * val client = OkHttpClient.Builder().build()
- * val factory = Quiche4jWebSocketFactory.Builder()
- *   .client(client)            // supplies trust / hostname / timeouts
- *   .fallback(client)          // called when H/3 isn't available
- *   .build()
+ * val quiche = Quiche4jWebSocketFactory.Builder().client(okHttpClient).build()
+ * val factory = FailoverWebSocketFactory(primary = quiche, secondary = okHttpClient)
  * val ws = factory.newWebSocket(request, listener)
  * ```
  *
- * The HTTP/3 path does not flow through [Quiche4jInterceptor], and deliberately so — a
- * WebSocket is not a request/response pair that Cache/Bridge interceptors should see. It
- * does reuse the same [Quiche4jEngine] shape (pooled QUIC connection per origin) so a
- * page that opens multiple WebSockets to one host shares a single handshake.
+ * [newWebSocket] is **non-blocking**, matching [OkHttpClient.newWebSocket]. The returned
+ * [WebSocket] starts in a "connecting" state: the extended-CONNECT handshake runs on the
+ * supplied connect executor (defaulting to the client's Dispatcher executor), and messages
+ * sent via [WebSocket.send] before the handshake completes are queued. On success,
+ * [WebSocketListener.onOpen] fires and queued messages are drained. On failure,
+ * [WebSocketListener.onFailure] fires and no further callbacks run.
+ *
+ * Typical wiring without failover:
+ *
+ * ```kotlin
+ * val client = OkHttpClient.Builder().build()
+ * val factory = Quiche4jWebSocketFactory.Builder().client(client).build()
+ * val ws = factory.newWebSocket(request, listener)
+ * ```
  */
 class Quiche4jWebSocketFactory internal constructor(
   internal val engine: Quiche4jEngine,
   internal val client: OkHttpClient,
-  internal val fallback: WebSocket.Factory,
+  internal val connectExecutor: Executor,
 ) : WebSocket.Factory {
   override fun newWebSocket(
     request: Request,
     listener: WebSocketListener,
   ): WebSocket {
-    val preference = Http3Preference.of(request)
-
-    // Cases that can't use HTTP/3: fall back immediately without attempting a handshake.
-    // ws:// is plaintext; QUIC requires TLS. Users who want H/3 WebSockets must use wss://.
+    // QUIC requires TLS. Plaintext ws:// is a configuration error for this factory —
+    // callers who need ws:// support should use a FailoverWebSocketFactory wrapping an
+    // OkHttpClient, so the ws:// request reaches the HTTP/1.1 transport.
     val scheme = request.url.scheme
-    val isSecure = scheme == "https" || scheme == "wss"
-    if (!isSecure || preference is Http3Preference.ForceOff) {
-      return fallback.newWebSocket(request, listener)
+    require(scheme == "wss" || scheme == "https") {
+      "Quiche4jWebSocketFactory requires wss:// or https://, got $scheme"
     }
-
-    return try {
-      Quiche4jWebSocket.connect(engine, client, request, listener)
-    } catch (e: Exception) {
-      // Force(fallback = false) → propagate; otherwise, try the fallback.
-      if (preference is Http3Preference.Force && !preference.fallback) throw e
-      fallback.newWebSocket(request, listener)
-    }
+    val proxy = ConnectingQuiche4jWebSocket(engine, client, request, listener)
+    connectExecutor.execute { proxy.doConnect() }
+    return proxy
   }
 
   class Builder {
     private var client: OkHttpClient? = null
-    private var fallback: WebSocket.Factory? = null
+    private var connectExecutor: Executor? = null
 
     /**
-     * The [OkHttpClient] whose TLS trust, hostname verifier, and timeouts configure the
-     * HTTP/3 handshake. Defaults to a new `OkHttpClient.Builder().build()` if unset.
+     * The [OkHttpClient] whose TLS trust, hostname verifier, DNS, and timeouts configure
+     * the HTTP/3 handshake. Defaults to a new `OkHttpClient.Builder().build()`.
      */
     fun client(client: OkHttpClient) = apply { this.client = client }
 
     /**
-     * The [WebSocket.Factory] to delegate to when HTTP/3 can't be used. Defaults to the
-     * supplied [client] — which is exactly what most callers want, since `OkHttpClient`
-     * itself implements [WebSocket.Factory] via its standard HTTP/1.1-upgrade path.
+     * The executor that runs the H/3 handshake. Defaults to the [client]'s Dispatcher
+     * executor — the same pool that [OkHttpClient] uses for async calls.
      */
-    fun fallback(fallback: WebSocket.Factory) = apply { this.fallback = fallback }
+    fun connectExecutor(executor: Executor) = apply { this.connectExecutor = executor }
 
     fun build(): Quiche4jWebSocketFactory {
       val c = client ?: OkHttpClient.Builder().build()
-      val f = fallback ?: c
+      val e: Executor = connectExecutor ?: c.dispatcher.executorService
       return Quiche4jWebSocketFactory(
         engine = Quiche4jEngine(),
         client = c,
-        fallback = f,
+        connectExecutor = e,
       )
     }
   }
