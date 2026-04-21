@@ -468,11 +468,12 @@ already-landed `peer_cert_chain` and `application_proto` bindings.
 - **`conn.timeoutNanos()`.** Available as `Connection::timeout()`; add a
   JNI binding so we can move off `soTimeout`-based polling to a proper
   monotonic timer wheel.
-- **Cipher suite + TLS version enums.** Not available in quiche 0.26.1's
-  public Rust API at all — `handshake.cipher()` is on a private field. So
-  this needs an upstream quiche PR adding a `Connection::cipher()` (or
-  similar) first, and then a JNI binding here. Today the `Handshake` we
-  build is pinned to `TLS_1_3 / TLS_AES_128_GCM_SHA256`.
+- **Cipher suite + TLS version enums.** Punted — needs an upstream
+  quiche change. `handshake.cipher()` is on a private field and quiche's
+  public `Connection` has no accessor. Full proposal in
+  [`upstream-issues/quiche-expose-negotiated-tls-params.md`](upstream-issues/quiche-expose-negotiated-tls-params.md),
+  ready to raise on cloudflare/quiche. Today the `Handshake` we build is
+  pinned to `TLS_1_3 / TLS_AES_128_GCM_SHA256`.
 - **ECH support.** Punted — needs an upstream change to quiche itself,
   not just to quiche4j. Full investigation + proposed API options
   (`Config::set_ech_config_list` or a per-`Ssl` init callback) captured
