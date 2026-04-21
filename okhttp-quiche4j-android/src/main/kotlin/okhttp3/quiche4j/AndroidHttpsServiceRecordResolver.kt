@@ -13,6 +13,7 @@ import android.net.DnsResolver
 import android.os.CancellationSignal
 import androidx.annotation.RequiresApi
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import okio.ByteString.Companion.toByteString
@@ -36,8 +37,14 @@ import org.xbill.DNS.Section
 class AndroidHttpsServiceRecordResolver(
   private val dnsResolver: DnsResolver = DnsResolver.getInstance(),
   private val timeoutMillis: Long = 2_000,
+  /**
+   * Executor `DnsResolver.rawQuery` uses for its callback. Defaults to a shared, bounded
+   * daemon pool — DNS queries complete quickly and a couple of threads is enough. Pass a
+   * different executor (e.g. `OkHttpClient.dispatcher.executorService`) to fold into
+   * whatever pool the rest of the app already runs on.
+   */
+  private val executor: Executor = DEFAULT_EXECUTOR,
 ) : HttpsServiceRecordResolver {
-  private val executor = Executors.newCachedThreadPool()
 
   override fun lookup(hostname: String): List<HttpsServiceRecord> {
     val future = CompletableFuture<ByteArray?>()
@@ -102,5 +109,14 @@ class AndroidHttpsServiceRecordResolver(
   private companion object {
     /** DNS resource record type 65 = HTTPS (RFC 9460). */
     const val HTTPS_DNS_TYPE = 65
+
+    /**
+     * Shared daemon pool used when the caller doesn't supply an [Executor]. Bounded so a
+     * burst of lookups can't explode thread count.
+     */
+    private val DEFAULT_EXECUTOR: Executor =
+      Executors.newFixedThreadPool(2) { r ->
+        Thread(r, "okhttp-quiche4j-android-dns").apply { isDaemon = true }
+      }
   }
 }

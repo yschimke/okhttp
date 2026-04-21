@@ -39,7 +39,10 @@ dependencies {
 
   testImplementation(projects.okhttpTestingSupport)
   testImplementation(projects.okhttpTls)
-  testImplementation(projects.okhttpQuiche4j)
+  // friendsTestImplementation grants visibility into okhttp-quiche4j's `internal` members
+  // (specifically `Quiche4jInterceptor.pooledConnectionCount`, used by the concurrent-fetch
+  // assertion). Uses the same hook okhttp.base-conventions wires up for every module.
+  "friendsTestImplementation"(projects.okhttpQuiche4j)
   testImplementation(libs.junit.jupiter.api)
   testImplementation(libs.junit.jupiter.params)
   testImplementation(libs.junit.jupiter.engine)

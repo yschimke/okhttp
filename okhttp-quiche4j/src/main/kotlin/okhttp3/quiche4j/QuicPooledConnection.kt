@@ -264,8 +264,14 @@ internal class QuicPooledConnection private constructor(
             for (h in headers) {
               val n = h.name()
               val v = h.value()
-              if (n == ":status") status = v.toInt()
-              else normal += n to v
+              if (n == ":status") {
+                // toIntOrNull so a malformed `:status: abc` from a broken/hostile peer fails
+                // just this stream (via status == -1 → IOException downstream), not the whole
+                // pooled connection via an unhandled NumberFormatException on the I/O thread.
+                status = v.toIntOrNull() ?: -1
+              } else {
+                normal += n to v
+              }
             }
             pending.set(PendingEvent.Headers(sid, status, normal, hasBody))
           }

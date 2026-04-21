@@ -10,6 +10,7 @@
 package okhttp3.quiche4j
 
 import java.io.IOException
+import java.io.InterruptedIOException
 import okio.Buffer
 import okio.Sink
 import okio.Timeout
@@ -54,7 +55,15 @@ internal class QuicRequestBodySink(
           if (n < 0 && n != io.quiche4j.Quiche.ErrorCode.DONE.toLong()) {
             throw IOException("quiche4j sendBody failed: $n")
           }
-          Thread.sleep(5)
+          try {
+            Thread.sleep(5)
+          } catch (e: InterruptedException) {
+            // Restore the interrupt flag + translate to an IOException so the caller's outer
+            // try/catch (and Quiche4jInterceptor's fallback path, if applicable) sees it
+            // cleanly instead of a checked exception bubbling out of an `okio.Sink.write`.
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("interrupted while waiting for QUIC flow-control window")
+          }
           continue
         }
         offset += n.toInt()

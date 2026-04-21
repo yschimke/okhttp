@@ -142,6 +142,11 @@ internal class Quiche4jCallServer(
 
       eventListener.responseHeadersStart(call)
       val responseHeaders = stream.headersFuture.get()
+      if (responseHeaders.status < 0) {
+        throw java.io.IOException(
+          "HTTP/3 peer sent a malformed :status pseudo-header (not parseable as a positive int)",
+        )
+      }
 
       val contentType =
         responseHeaders.headers

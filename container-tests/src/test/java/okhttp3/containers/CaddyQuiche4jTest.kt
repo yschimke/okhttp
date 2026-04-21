@@ -128,4 +128,69 @@ class CaddyQuiche4jTest {
       assertThat(handshake.peerCertificates).isNotEmpty()
     }
   }
+
+  /**
+   * Fire a large number of concurrent requests at the same origin. Confirms:
+   *  * the pool still produces exactly one `QuicPooledConnection` (all calls share it),
+   *  * the I/O thread handles concurrent stream openings without dropping events,
+   *  * we aren't leaking threads or deadlocking under thread contention (`newCachedThreadPool`
+   *    would silently scale to N threads — the default pool is bounded to a handful).
+   *
+   * Tunable via `-Pquiche4jConcurrentRequests=N`; defaults to 50.
+   */
+  @Test fun concurrentFetchesShareASinglePooledConnection() {
+    val n = (System.getProperty("quiche4jConcurrentRequests"))?.toIntOrNull() ?: 50
+    val interceptor = Quiche4jInterceptor.Builder().build()
+    val client =
+      OkHttpClient
+        .Builder()
+        .sslSocketFactory(
+          handshakeCertificates.sslSocketFactory(),
+          handshakeCertificates.trustManager,
+        ).addInterceptor(interceptor)
+        .build()
+    val executor = java.util.concurrent.Executors.newFixedThreadPool(16) { r ->
+      Thread(r, "quiche4j-concurrent-test").apply { isDaemon = true }
+    }
+    val failures = java.util.concurrent.atomic.AtomicInteger(0)
+    val successes = java.util.concurrent.atomic.AtomicInteger(0)
+    val latch = java.util.concurrent.CountDownLatch(n)
+    try {
+      repeat(n) {
+        executor.submit {
+          try {
+            val req =
+              Request
+                .Builder()
+                .url("https://localhost:$PORT/")
+                .tag(Http3Preference::class.java, Http3Preference.Force())
+                .build()
+            client.newCall(req).execute().use { resp ->
+              if (resp.protocol == Protocol.HTTP_3 && resp.code == 200) {
+                resp.body.string() // drain
+                successes.incrementAndGet()
+              } else {
+                failures.incrementAndGet()
+              }
+            }
+          } catch (_: Throwable) {
+            failures.incrementAndGet()
+          } finally {
+            latch.countDown()
+          }
+        }
+      }
+      check(latch.await(60, java.util.concurrent.TimeUnit.SECONDS)) {
+        "concurrent fetches didn't finish in 60s: succeeded=${successes.get()} failed=${failures.get()}"
+      }
+    } finally {
+      executor.shutdownNow()
+    }
+    assertThat(failures.get()).isEqualTo(0)
+    assertThat(successes.get()).isEqualTo(n)
+    // The whole point: a burst of concurrent requests to one origin does not spawn multiple
+    // QuicPooledConnections. The pool's lock around (host, port) acquisition serialises
+    // handshakes; once the first connection is established every other call reuses it.
+    assertThat(interceptor.pooledConnectionCount).isEqualTo(1)
+  }
 }

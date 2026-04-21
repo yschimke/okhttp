@@ -9,9 +9,13 @@
  */
 package okhttp3.quiche4j
 
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
+import java.net.SocketAddress
 import okhttp3.Address
 import okhttp3.Connection
 import okhttp3.Handshake
@@ -59,21 +63,70 @@ internal class QuicConnectionHandle(
     return Route(address, Proxy.NO_PROXY, peer)
   }
 
-  override fun socket(): Socket = CLOSED_PLACEHOLDER
+  override fun socket(): Socket = PLACEHOLDER_SOCKET
 
   override fun handshake(): Handshake = handshake
 
   override fun protocol(): Protocol = protocol
 
   companion object {
-    /** Single shared, closed `Socket` handed to every [socket] caller. Avoids leaking FDs. */
-    private val CLOSED_PLACEHOLDER: Socket =
-      Socket().also {
-        try {
-          it.close()
-        } catch (_: Throwable) {
-          // best effort
-        }
-      }
+    /**
+     * Single shared placeholder returned by [socket]. A QUIC connection has no TCP socket;
+     * instead of a closed real [Socket] (which fails with a confusing
+     * `SocketException: Socket is closed`), this subclass throws a clear
+     * [UnsupportedOperationException] from every accessor a caller might reasonably try.
+     * Peer info lives on [route] — observability code should read from there.
+     */
+    private val PLACEHOLDER_SOCKET: Socket = PlaceholderSocket
+  }
+}
+
+/**
+ * A [Socket] that is never connected and throws with a descriptive error on every meaningful
+ * operation. Shared singleton — one instance across every [QuicConnectionHandle], so there's no
+ * per-call allocation and no FD can leak no matter what the caller does.
+ *
+ * [close] is a no-op: the instance is never opened, and EventListener implementations sometimes
+ * close the returned socket reflexively after the call finishes.
+ */
+private object PlaceholderSocket : Socket() {
+  private fun fail(op: String): Nothing =
+    throw UnsupportedOperationException(
+      "Socket.$op is not available on okhttp-quiche4j's Connection: this is a QUIC (HTTP/3) " +
+        "connection, not a TCP socket. The Connection handle exists only so EventListener " +
+        "implementations see connectionAcquired / connectionReleased. Read peer information " +
+        "from Connection.route() or Connection.handshake() instead.",
+    )
+
+  override fun getInputStream(): InputStream = fail("getInputStream()")
+
+  override fun getOutputStream(): OutputStream = fail("getOutputStream()")
+
+  override fun getInetAddress(): InetAddress? = fail("getInetAddress()")
+
+  override fun getLocalAddress(): InetAddress = fail("getLocalAddress()")
+
+  override fun getPort(): Int = fail("getPort()")
+
+  override fun getLocalPort(): Int = fail("getLocalPort()")
+
+  override fun getRemoteSocketAddress(): SocketAddress? = fail("getRemoteSocketAddress()")
+
+  override fun getLocalSocketAddress(): SocketAddress? = fail("getLocalSocketAddress()")
+
+  override fun getChannel(): java.nio.channels.SocketChannel? = fail("getChannel()")
+
+  override fun isConnected(): Boolean = false
+
+  override fun isBound(): Boolean = false
+
+  override fun isClosed(): Boolean = true
+
+  override fun shutdownInput() = fail("shutdownInput()")
+
+  override fun shutdownOutput() = fail("shutdownOutput()")
+
+  override fun close() {
+    // no-op; we were never open.
   }
 }
