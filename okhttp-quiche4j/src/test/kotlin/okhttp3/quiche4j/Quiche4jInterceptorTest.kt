@@ -11,6 +11,7 @@ package okhttp3.quiche4j
 
 import assertk.assertThat
 import assertk.assertions.contains
+import assertk.assertions.isEmpty
 import assertk.assertions.isEqualTo
 import assertk.assertions.isFalse
 import assertk.assertions.isGreaterThan
@@ -49,6 +50,9 @@ class Quiche4jInterceptorTest {
     val client =
       OkHttpClient
         .Builder()
+        // HttpsAwareDns supplies the positive h3 signal the conservative default requires —
+        // cloudflare-quic.com publishes an HTTPS DNS record with h3 in ALPN.
+        .dns(HttpsAwareDns())
         .addInterceptor(interceptor)
         .build()
     val request = Request.Builder().url("https://cloudflare-quic.com/").build()
@@ -218,6 +222,7 @@ class Quiche4jInterceptorTest {
     val client =
       OkHttpClient
         .Builder()
+        .dns(HttpsAwareDns()) // positive h3 signal
         .addInterceptor(interceptor)
         .build()
     val request =
@@ -236,6 +241,7 @@ class Quiche4jInterceptorTest {
     val client =
       OkHttpClient
         .Builder()
+        .dns(HttpsAwareDns()) // seed h3 via HTTPS record
         .addInterceptor(interceptor)
         .build()
     val request = Request.Builder().url("https://cloudflare-quic.com/").build()
@@ -358,11 +364,124 @@ class Quiche4jInterceptorTest {
     }
   }
 
+  @Test fun `plaintext http URLs fall through the interceptor`() {
+    val terminalInvoked = java.util.concurrent.atomic.AtomicBoolean(false)
+    val terminal =
+      okhttp3.Interceptor { c ->
+        terminalInvoked.set(true)
+        okhttp3.Response
+          .Builder()
+          .request(c.request())
+          .protocol(okhttp3.Protocol.HTTP_3)
+          .code(200)
+          .message("")
+          .body(okhttp3.ResponseBody.create(null, "h3"))
+          .build()
+      }
+    val engine = Quiche4jEngine()
+    val cache = InMemoryAltSvcCache()
+    val interceptor =
+      Quiche4jInterceptor(
+        engine = engine,
+        httpsRecordResolver = null,
+        altSvcCache = cache,
+        terminal = terminal,
+      )
+    val fellThrough = java.util.concurrent.atomic.AtomicBoolean(false)
+    val client =
+      OkHttpClient
+        .Builder()
+        .addInterceptor(interceptor)
+        .addInterceptor { c ->
+          fellThrough.set(true)
+          okhttp3.Response
+            .Builder()
+            .request(c.request())
+            .protocol(okhttp3.Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(okhttp3.ResponseBody.create(null, "plain"))
+            .build()
+        }.build()
+    val request = Request.Builder().url("http://example.com/").build()
+    client.newCall(request).execute().use { resp ->
+      assertThat(fellThrough.get()).isTrue()
+      assertThat(terminalInvoked.get()).isFalse()
+      assertThat(resp.body?.string()).isEqualTo("plain")
+    }
+  }
+
+  @Test fun `Alt-Svc clear removes cached entries through the interceptor`() {
+    val cache = InMemoryAltSvcCache()
+    val origin = AltSvcOrigin("https", "example.com", 443)
+    cache.put(origin, listOf(AltSvcEntry("h3", "", 443, System.currentTimeMillis() + 60_000)))
+
+    val terminal =
+      okhttp3.Interceptor { c ->
+        okhttp3.Response
+          .Builder()
+          .request(c.request())
+          .protocol(okhttp3.Protocol.HTTP_3)
+          .code(200)
+          .message("")
+          .header("Alt-Svc", "clear")
+          .body(okhttp3.ResponseBody.create(null, "cleared"))
+          .build()
+      }
+    val interceptor =
+      Quiche4jInterceptor(
+        engine = Quiche4jEngine(),
+        httpsRecordResolver = null,
+        altSvcCache = cache,
+        terminal = terminal,
+      )
+    val client = OkHttpClient.Builder().addInterceptor(interceptor).build()
+    // The cache already has an h3 entry so the interceptor will pick the terminal, which
+    // returns Alt-Svc: clear and triggers updateAltSvcFromResponse.
+    val request = Request.Builder().url("https://example.com/").build()
+    client.newCall(request).execute().use { it.body?.bytes() }
+    assertThat(cache.get(origin)).isEmpty()
+  }
+
+  @Test fun `multiple Alt-Svc response headers combine`() {
+    val cache = InMemoryAltSvcCache()
+    val origin = AltSvcOrigin("https", "example.com", 443)
+    val terminal =
+      okhttp3.Interceptor { c ->
+        okhttp3.Response
+          .Builder()
+          .request(c.request())
+          .protocol(okhttp3.Protocol.HTTP_3)
+          .code(200)
+          .message("")
+          .addHeader("Alt-Svc", """h3=":443"; ma=3600""")
+          .addHeader("Alt-Svc", """h2=":8443"; ma=60""")
+          .body(okhttp3.ResponseBody.create(null, "ok"))
+          .build()
+      }
+    // Pre-seed so the interceptor takes the h3 branch (pure-Alt-Svc decision).
+    cache.put(origin, listOf(AltSvcEntry("h3", "", 443, System.currentTimeMillis() + 60_000)))
+    val interceptor =
+      Quiche4jInterceptor(
+        engine = Quiche4jEngine(),
+        httpsRecordResolver = null,
+        altSvcCache = cache,
+        terminal = terminal,
+      )
+    val client = OkHttpClient.Builder().addInterceptor(interceptor).build()
+    val request = Request.Builder().url("https://example.com/").build()
+    client.newCall(request).execute().use { it.body?.bytes() }
+    val entries = cache.get(origin).map { it.protocolId to it.port }.toSet()
+    assertThat(entries).contains("h3" to 443)
+    assertThat(entries).contains("h2" to 8443)
+  }
+
   @Test fun `live fetch against public h3 server with real TLS`() {
     val interceptor = Quiche4jInterceptor.Builder().build()
     val client =
       OkHttpClient
         .Builder()
+        .dns(HttpsAwareDns()) // positive h3 signal required by the conservative default
         .addInterceptor(interceptor)
         .build()
     val request = Request.Builder().url("https://cloudflare-quic.com/").build()

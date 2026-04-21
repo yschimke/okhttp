@@ -181,7 +181,14 @@ class Quiche4jCacheTest {
       )
     val quicheClient = baseClient.newBuilder().addInterceptor(interceptor).build()
 
-    val revalidated = quicheClient.newCall(Request.Builder().url(url).build()).execute()
+    // Force tells the conservative interceptor "yes, try H/3 here" without needing a
+    // positive signal from an HTTPS DNS record or pre-seeded Alt-Svc. This test is about
+    // the inner CacheInterceptor, not the discovery decision.
+    val revalidated =
+      quicheClient
+        .newCall(
+          Request.Builder().url(url).tag<Http3Preference>(Http3Preference.Force()).build(),
+        ).execute()
     assertThat(terminalRan.get()).isEqualTo(true)
     // The final response code should be 200 (CacheInterceptor translated the 304 into the
     // cached body), NOT 304.
@@ -227,8 +234,13 @@ class Quiche4jCacheTest {
 
     val response =
       client
-        .newCall(Request.Builder().url("https://example.invalid/miss").build())
-        .execute()
+        .newCall(
+          Request
+            .Builder()
+            .url("https://example.invalid/miss")
+            .tag<Http3Preference>(Http3Preference.Force())
+            .build(),
+        ).execute()
     assertThat(served.get()).isEqualTo(true)
     assertThat(response.body.string()).isEqualTo(body)
     assertThat(response.protocol).isEqualTo(Protocol.HTTP_3)

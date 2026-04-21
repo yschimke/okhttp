@@ -18,18 +18,26 @@ import okhttp3.Request
  * [Quiche4jWebSocketFactory] so the two surfaces agree on "is this origin reachable over
  * H/3 right now" without duplicating the tag / HTTPS-record / Alt-Svc plumbing.
  *
- * Priority, highest first:
+ * **Conservative by default** — we only attempt HTTP/3 when we have a positive signal:
  *
  *  1. [Http3Preference.Force] on the request → always yes.
- *  2. Discovery is disabled (no [HttpsAware] [Dns], no explicit resolver, no Alt-Svc cache
- *     entry yet) → assume yes, because the caller chose this interceptor / factory.
- *  3. HTTPS DNS record (RFC 9460) advertises h3 → yes.
- *  4. Alt-Svc cache has an unexpired `h3` entry → yes.
- *  5. Otherwise → no.
+ *  2. HTTPS DNS record (RFC 9460) advertises h3 → yes.
+ *  3. Alt-Svc cache has an unexpired `h3` entry for this origin → yes.
+ *  4. Otherwise → no (the interceptor falls through; the WebSocket factory fires
+ *     [NoHttp3Route]).
+ *
+ * Rationale: attempting an unsolicited QUIC handshake to an origin that doesn't speak
+ * HTTP/3 costs a UDP round-trip and a TLS handshake's worth of CPU before the handshake
+ * times out — much more than the cost of adding an interceptor that never engages. The
+ * positive-signal policy matches how Chrome and Cronet handle QUIC selection: they ship
+ * a pre-seeded list of known-good origins ("QUIC hints") and discover the rest via HTTPS
+ * records and Alt-Svc. Callers who want the same pre-seeding should populate
+ * [AltSvcCache] on the `Quiche4jInterceptor.Builder` / `Quiche4jWebSocketFactory.Builder`
+ * at startup — see the H/3 hints sample in the module README.
  *
  * [Http3Preference.ForceOff] is handled before calling this — callers should short-circuit
- * there. `ForceOff` on a path that must use H/3 (e.g. [Quiche4jWebSocketFactory] in
- * isolation) surfaces as [NoHttp3Route] rather than reaching this helper.
+ * there. `ForceOff` on a path that must use H/3 surfaces as [NoHttp3Route] rather than
+ * reaching this helper.
  */
 internal object Http3Decision {
   fun shouldAttempt(
@@ -43,20 +51,12 @@ internal object Http3Decision {
 
     val hostname = request.url.host
     val record = resolveHttpsRecord(hostname, dns, httpsResolver)
+    if (record?.supportsHttp3 == true) return true
+
     val origin = AltSvcOrigin.of(request.url)
-    val altSvcHasH3 = altSvcCache.get(origin).any { it.protocolId.equals("h3", ignoreCase = true) }
+    if (altSvcCache.get(origin).any { it.protocolId.equals("h3", ignoreCase = true) }) return true
 
-    val discoveryEnabled =
-      dns is HttpsAware ||
-        httpsResolver != null ||
-        altSvcCache.get(origin).isNotEmpty()
-
-    return when {
-      !discoveryEnabled -> true
-      record?.supportsHttp3 == true -> true
-      altSvcHasH3 -> true
-      else -> false
-    }
+    return false
   }
 
   private fun resolveHttpsRecord(
