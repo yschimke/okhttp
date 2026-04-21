@@ -35,6 +35,15 @@ internal class QuicRequestBodySink(
    * can't hang the call thread forever.
    */
   private val writeTimeoutMillis: Long = 0L,
+  /**
+   * When `true` (default), [close] sends a zero-byte chunk with `fin=true` to terminate the
+   * QUIC stream — the natural behaviour for a one-shot HTTP request body.
+   *
+   * WebSocket connections (RFC 9220) reuse this sink but keep the stream open for the full
+   * session; they close the stream separately via [finish] when the WebSocket close handshake
+   * completes. Pass `false` for that case.
+   */
+  private val sendFinOnClose: Boolean = true,
 ) : Sink {
   @Volatile private var closed: Boolean = false
 
@@ -72,10 +81,20 @@ internal class QuicRequestBodySink(
   override fun close() {
     if (closed) return
     closed = true
+    if (sendFinOnClose) finish()
+  }
+
+  /**
+   * Explicitly terminate the QUIC stream with a zero-byte `fin=true` chunk. Used by
+   * WebSocket teardown (where [close] deliberately doesn't fin) and called from [close] on
+   * request-body sinks via [sendFinOnClose]. Swallows `IOException` — if the stream is
+   * already broken, `cancelStream` has (or will) clean up.
+   */
+  fun finish() {
     try {
       pool.sendBodyChunk(stream, EMPTY_BYTES, fin = true, timeoutMillis = writeTimeoutMillis)
     } catch (_: IOException) {
-      // Best effort — if the stream is already broken, cancelStream has (or will) clean up.
+      // Best effort.
     }
   }
 
