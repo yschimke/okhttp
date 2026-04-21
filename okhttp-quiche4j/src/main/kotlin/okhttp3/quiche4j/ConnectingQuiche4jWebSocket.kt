@@ -11,6 +11,7 @@ package okhttp3.quiche4j
 
 import java.io.IOException
 import java.util.ArrayDeque
+import java.util.concurrent.Executor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -34,6 +35,7 @@ internal class ConnectingQuiche4jWebSocket(
   private val altSvcCache: AltSvcCache,
   private val request: Request,
   private val userListener: WebSocketListener,
+  private val readerExecutor: Executor,
 ) : WebSocket {
   private val lock = Any()
 
@@ -124,7 +126,14 @@ internal class ConnectingQuiche4jWebSocket(
     }
 
     try {
-      val ws = Quiche4jWebSocket.connect(engine, client, request, proxiedListener)
+      val ws =
+        Quiche4jWebSocket.connect(
+          engine = engine,
+          client = client,
+          originalRequest = request,
+          listener = proxiedListener,
+          readerExecutor = readerExecutor,
+        )
       val drainSnapshot: List<Pending>
       val closeAfter: Pending.Close?
       synchronized(lock) {

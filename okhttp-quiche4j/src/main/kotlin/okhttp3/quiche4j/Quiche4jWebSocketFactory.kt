@@ -76,6 +76,9 @@ class Quiche4jWebSocketFactory internal constructor(
         altSvcCache = altSvcCache,
         request = request,
         userListener = listener,
+        // The reader loop reuses the same executor as the handshake. One configurable
+        // pool, one shutdown hook — no per-WebSocket `new Thread(...)`.
+        readerExecutor = connectExecutor,
       )
     connectExecutor.execute { proxy.doConnect() }
     return proxy
@@ -97,9 +100,15 @@ class Quiche4jWebSocketFactory internal constructor(
     private var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
 
     /**
-     * The executor that runs the H/3 handshake. Defaults to the client's Dispatcher
-     * executor — the same pool that [OkHttpClient] uses for async calls, so the caller
-     * already owns its shutdown.
+     * The executor that runs the H/3 handshake **and** the per-WebSocket reader loop.
+     * Defaults to the client's Dispatcher executor — the same pool that [OkHttpClient]
+     * uses for async calls, so the caller already owns its shutdown.
+     *
+     * The reader loop is long-running: one task per live WebSocket, pinned for the
+     * duration. The default Dispatcher executor is an unbounded cached pool so this is
+     * safe. If you supply a bounded executor, size it so `<max concurrent handshakes> +
+     * <max live WebSockets>` fits — otherwise the handshake will starve behind reader
+     * loops.
      */
     fun connectExecutor(executor: Executor): Builder = apply { this.connectExecutor = executor }
 

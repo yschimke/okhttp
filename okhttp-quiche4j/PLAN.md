@@ -230,6 +230,66 @@ first-class. These are the candidates, not commitments.
      · bodyQueue (Bytes | End | Error)
 ```
 
+## Threading model
+
+There are four thread/executor roles in the module. The rule we hold to is:
+**nothing in this module creates an ad-hoc `new Thread(...)` on a per-request
+basis.** Per-request work either runs on the caller's thread, on the shared
+per-origin I/O thread, or on a configurable executor the caller owns.
+
+| # | Role | Who owns it | Lifetime | Why it exists |
+|---|------|-------------|----------|---------------|
+| 1 | **Caller thread** (synchronous calls / `chain.proceed()`) | OkHttp (`Dispatcher` worker or user thread) | per call | Blocks on `headersFuture` / drains `QuicBodySource`. We do **not** move request-body writes off it (one-shot `sendBody` is cheap); duplex will change that — see [Duplex requests](#duplex-requests--pending). |
+| 2 | **Per-origin I/O thread** (`quiche4j-io-<host>:<port>`) | `QuicPooledConnection`, one per pooled connection | lifetime of the pooled QUIC connection (daemon) | Quiche is not thread-safe. Every `conn.*` / `h3.*` call is funnelled onto this thread via a `LinkedBlockingQueue<Runnable>`. Also drives UDP recv/send and the pacing timer. This is the **one** raw `Thread` in the module; it is explicitly not per-request. |
+| 3 | **HTTPS-record lookup executor** (`okhttp-quiche4j-https-dns`, fixed 2, daemon) | `HttpsAwareDns` (optional) | JVM lifetime | `Dns.lookup()` needs to dispatch a parallel HTTPS-record query alongside A/AAAA. The fixed pool caps worst-case thread count regardless of how many OkHttpClients reuse the same `HttpsAwareDns`. Only used when the caller installs `HttpsAwareDns`. |
+| 4 | **WebSocket handshake + reader executor** | `Quiche4jWebSocketFactory.connectExecutor`, defaults to `client.dispatcher.executorService` | per live WebSocket (one task queued for the handshake, one pinned worker for the reader loop) | `newWebSocket()` must be non-blocking, so the handshake runs async. The reader loop then blocks on `WebSocketReader.processNextFrame()` for the lifetime of the socket. Both tasks go through the **same** `Executor` so the caller has a single shutdown knob — no `new Thread(...)` per WebSocket. |
+
+### Rationale for the WebSocket choice
+
+We considered three options for running the WebSocket reader loop:
+
+1. **Raw `new Thread(...)`** — what the first pass did. Rejected: no
+   lifecycle hook for shutdown, no way for the caller to bound concurrent
+   WebSockets, and it diverges from every other thread in the module (each
+   of which is either owned by a pooled connection or by a
+   caller-configured executor).
+2. **A dedicated per-factory `ExecutorService`** — would work, but
+   introduces a second lifecycle for callers to manage on top of the
+   `OkHttpClient`'s Dispatcher. Symmetric argument to why
+   `Quiche4jWebSocketFactory.Builder` deliberately **requires** an
+   `OkHttpClient` rather than creating one.
+3. **The factory's connect executor** (what we do). The factory already
+   exposes a configurable `connectExecutor` defaulting to
+   `client.dispatcher.executorService` (an unbounded cached pool). The
+   reader loop is a long-running task — pinning one worker per live
+   WebSocket is fine on a cached pool. If the caller substitutes a
+   bounded executor, they need to size it for `<concurrent handshakes> +
+   <live WebSockets>`; this is called out in the `connectExecutor(...)`
+   KDoc.
+
+### What isn't a thread
+
+- `Quiche4jEngine` has no worker thread of its own — it's a pool of
+  pooled connections, not a scheduler.
+- `Quiche4jInterceptor` and `Quiche4jCallServer` run entirely on the
+  caller thread.
+- `QuicBodySource.read()` blocks on `stream.bodyQueue.take()`, not on a
+  thread we spawn — the I/O thread (role 2) fills the queue.
+
+### Future changes
+
+- **Stage-2 peer transport.** When we move this module's functionality
+  into OkHttp core, role 2 stays (quiche's thread model isn't going
+  to change), but roles 1 and 4 disappear into the existing
+  `ExchangeCodec` / `RealWebSocket` machinery. We don't need to
+  re-introduce per-WebSocket threads in that world either — `TaskRunner`
+  already owns that dispatch.
+- **Duplex.** See [Duplex requests](#duplex-requests--pending). Writes
+  move from role 1 to role 2 via a `QuicRequestBodySink`. No new thread
+  role.
+
+---
+
 ## Per-request flow (Stage 1)
 
 | Step | OkHttp side | quiche4j side |

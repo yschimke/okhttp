@@ -14,6 +14,7 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.Random
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -47,8 +48,11 @@ import okio.buffer
  *  * One [QuicStream] on that connection carrying CONNECT + `:protocol: websocket` headers,
  *    then raw WebSocket frames (RFC 6455 framing including client masking — see RFC 8441
  *    §3, inherited by RFC 9220).
- *  * One dedicated daemon thread running the [WebSocketReader] loop; listener callbacks
- *    (`onMessage`, `onClosing`, etc.) fire on that thread.
+ *  * One long-running task submitted to [readerExecutor] running the [WebSocketReader]
+ *    loop; listener callbacks (`onMessage`, `onClosing`, etc.) fire on whatever thread
+ *    that executor picked. The default executor is the same one the factory uses for the
+ *    handshake, which in turn defaults to the [OkHttpClient] Dispatcher's executor — so
+ *    the caller owns lifecycle via `dispatcher.executorService.shutdown()`.
  *  * Writes go through a `writeLock` — [WebSocketWriter] is not thread-safe.
  */
 internal class Quiche4jWebSocket private constructor(
@@ -58,6 +62,7 @@ internal class Quiche4jWebSocket private constructor(
   private val listener: WebSocketListener,
   private val response: Response,
   private val writeTimeoutMillis: Long,
+  private val readerExecutor: Executor,
 ) : WebSocket {
   private val writerSink =
     QuicRequestBodySink(
@@ -93,8 +98,6 @@ internal class Quiche4jWebSocket private constructor(
   private val writeLock = Any()
   private val closed = AtomicBoolean(false)
   private val failureReported = AtomicBoolean(false)
-
-  @Volatile private var readerThread: Thread? = null
 
   override fun request(): Request = originalRequest
 
@@ -157,13 +160,21 @@ internal class Quiche4jWebSocket private constructor(
   }
 
   private fun startReaderLoop() {
-    val t =
-      Thread({
+    // The reader loop is long-running: it blocks on WebSocketReader.processNextFrame()
+    // for the entire lifetime of the WebSocket. Submitting it to the shared executor
+    // pins one worker for that duration. That's fine for the default (the client's
+    // Dispatcher executor is an unbounded cached pool) and it keeps the caller's single
+    // shutdown/executor knob authoritative instead of introducing a rogue Thread.
+    readerExecutor.execute {
+      val thread = Thread.currentThread()
+      val previousName = thread.name
+      thread.name = "quiche4j-ws-reader-${pooled.key.host}:${pooled.key.port}"
+      try {
         try {
           listener.onOpen(this, response)
         } catch (t: Throwable) {
           fail(t as? IOException ?: IOException(t))
-          return@Thread
+          return@execute
         }
         try {
           while (!closed.get()) {
@@ -176,10 +187,10 @@ internal class Quiche4jWebSocket private constructor(
         } finally {
           pooled.releaseStream(stream)
         }
-      }, "quiche4j-ws-reader-${pooled.key.host}:${pooled.key.port}")
-    t.isDaemon = true
-    readerThread = t
-    t.start()
+      } finally {
+        thread.name = previousName
+      }
+    }
   }
 
   private inner class InboundFrames : WebSocketReader.FrameCallback {
@@ -238,6 +249,7 @@ internal class Quiche4jWebSocket private constructor(
       client: OkHttpClient,
       originalRequest: Request,
       listener: WebSocketListener,
+      readerExecutor: Executor,
     ): Quiche4jWebSocket {
       val httpUrl = originalRequest.url.asHttpsForH3()
       check(httpUrl.scheme == "https") {
@@ -329,6 +341,7 @@ internal class Quiche4jWebSocket private constructor(
           listener = listener,
           response = response,
           writeTimeoutMillis = client.writeTimeoutMillis.toLong(),
+          readerExecutor = readerExecutor,
         )
       ws.startReaderLoop()
       return ws
