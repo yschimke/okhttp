@@ -118,23 +118,17 @@ internal class Quiche4jCallServer(
       eventListener.requestHeadersEnd(call, request)
 
       if (isDuplex) {
-        // Duplex body: run RequestBody.writeTo(sink) on a worker thread so we can return the
-        // Response as soon as headers arrive. The sink forwards writes to the pool's I/O thread
-        // via sendBodyChunk, so quiche stays single-threaded per connection.
+        // Same contract as okhttp3.internal.http.CallServerInterceptor: call writeTo on the
+        // call thread. The caller's writeTo is expected to register an async producer and
+        // return quickly without closing the sink; the async producer eventually writes bytes
+        // + closes the sink (which sends fin=true over the QUIC stream). The call thread then
+        // falls through to read response headers. QuicRequestBodySink's writes hop onto the
+        // pool's I/O thread so quiche stays single-threaded per connection — no extra thread
+        // of our own.
         val sink = QuicRequestBodySink(stream, pooled).buffer()
-        val duplexThread =
-          Thread({
-            try {
-              rawBody!!.writeTo(sink)
-              sink.close()
-              eventListener.requestBodyEnd(call, -1L) // byte count unknown for streaming bodies
-            } catch (t: Throwable) {
-              pooled.cancelStream(stream)
-              eventListener.requestFailed(call, t as? java.io.IOException ?: java.io.IOException(t))
-            }
-          }, "quiche4j-duplex-${call.request().url.host}")
-        duplexThread.isDaemon = true
-        duplexThread.start()
+        rawBody!!.writeTo(sink)
+        // Do NOT close the sink here — for duplex, the application closes it when its async
+        // producer finishes. requestBodyEnd will fire when the sink is closed.
       } else if (!hasBody) {
         // No body — headers were sent with fin=true.
       } else {
