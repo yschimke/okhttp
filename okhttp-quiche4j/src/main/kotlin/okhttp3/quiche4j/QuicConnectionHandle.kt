@@ -21,16 +21,24 @@ import okhttp3.Route
 
 /**
  * A synthetic [Connection] used only to signal `connectionAcquired`/`connectionReleased`
- * through [okhttp3.EventListener]. Has no live TCP [Socket]; callers that call [socket] get a
- * closed placeholder. See `PLAN.md` — Stage 2 replaces this with a real `QuicCarrier`.
+ * through [okhttp3.EventListener].
+ *
+ * This class does **not** represent a real TCP socket or the underlying QUIC transport:
+ *
+ *  * [socket] returns a shared closed placeholder — creating a fresh `Socket()` per call
+ *    would leak an OS file descriptor per H/3 request until GC.
+ *  * [route] returns a *synthetic* [Route] using `Dns.SYSTEM`, the default `SocketFactory`,
+ *    etc. — **not** the values the caller configured on their `OkHttpClient`. Observability
+ *    code that reads the route expecting the client's real DNS/socket-factory will see
+ *    placeholders.
+ *
+ * Stage 2 replaces this with a real `QuicCarrier` backed by the pooled QUIC connection.
  */
 internal class QuicConnectionHandle(
   private val peer: InetSocketAddress,
   private val protocol: Protocol,
   val handshake: Handshake,
 ) : Connection {
-  private val placeholder = Socket()
-
   override fun route(): Route {
     val dummyUrl = "https://${peer.hostString}:${peer.port}/".toHttpUrl()
     val address =
@@ -51,9 +59,21 @@ internal class QuicConnectionHandle(
     return Route(address, Proxy.NO_PROXY, peer)
   }
 
-  override fun socket(): Socket = placeholder
+  override fun socket(): Socket = CLOSED_PLACEHOLDER
 
   override fun handshake(): Handshake = handshake
 
   override fun protocol(): Protocol = protocol
+
+  companion object {
+    /** Single shared, closed `Socket` handed to every [socket] caller. Avoids leaking FDs. */
+    private val CLOSED_PLACEHOLDER: Socket =
+      Socket().also {
+        try {
+          it.close()
+        } catch (_: Throwable) {
+          // best effort
+        }
+      }
+  }
 }

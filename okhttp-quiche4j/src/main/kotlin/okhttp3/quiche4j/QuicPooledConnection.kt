@@ -59,7 +59,11 @@ internal class QuicPooledConnection private constructor(
 ) {
   private val streams = ConcurrentHashMap<Long, QuicStream>()
   private val taskQueue = LinkedBlockingQueue<Runnable>()
+  // Dedicated send/receive buffers. Previously these were aliased onto one array, which meant
+  // an outbound ACK could be clobbered by the next `socket.receive()` before it actually hit
+  // the wire. Keep them separate.
   private val sendBuf = ByteArray(Quiche4jEngine.MAX_DATAGRAM_SIZE)
+  private val recvPacketBuf = ByteArray(Quiche4jEngine.MAX_DATAGRAM_SIZE)
   private val recvBuf = ByteArray(Quiche4jEngine.MAX_DATAGRAM_SIZE * 32)
   private val activeCount = AtomicInteger(0)
 
@@ -206,9 +210,9 @@ internal class QuicPooledConnection private constructor(
 
         // 2. Read one packet with a short timeout (so we stay responsive to new tasks).
         try {
-          val packet = DatagramPacket(sendBuf, sendBuf.size)
+          val packet = DatagramPacket(recvPacketBuf, recvPacketBuf.size)
           socket.receive(packet)
-          val view = sendBuf.copyOfRange(packet.offset, packet.length)
+          val view = recvPacketBuf.copyOfRange(packet.offset, packet.length)
           val local = socket.localSocketAddress as InetSocketAddress
           val from = packet.socketAddress as InetSocketAddress
           val r = conn.recv(view, from, local)

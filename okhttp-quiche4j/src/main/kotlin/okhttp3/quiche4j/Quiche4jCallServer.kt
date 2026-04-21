@@ -95,7 +95,15 @@ internal class Quiche4jCallServer(
     val handle = QuicConnectionHandle(peer, Protocol.HTTP_3, pooled.handshake)
     eventListener.connectionAcquired(call, handle)
 
-    var stream: QuicStream? = null
+    // AtomicReference rather than a local var so the cancellation hook (which runs on the
+    // cancelling thread) sees the assignment from openStream promptly.
+    val streamRef = java.util.concurrent.atomic.AtomicReference<QuicStream?>()
+    // Register the cancellation hook *before* openStream so a cancel racing with openStream
+    // doesn't slip through. The hook runs on Call.cancel() via Call.addEventListener — no
+    // polling. If cancel fires before stream is set, nothing to tear down; if it fires after,
+    // cancelStream sends STOP_SENDING + RESET_STREAM and unblocks the consumer with an IOE.
+    CancellationHook.attach(call) { streamRef.get()?.let { pooled.cancelStream(it) } }
+
     var returnedSuccessfully = false
     try {
       eventListener.requestHeadersStart(call)
@@ -110,11 +118,8 @@ internal class Quiche4jCallServer(
           null
         }
       if (hasBody) eventListener.requestBodyStart(call)
-      stream = pooled.openStream(reqHeaders, bufferedBody, streamingBody = isDuplex)
-      // Push-based cancellation: Call.addEventListener composes an extra EventListener onto
-      // the call without disturbing the OkHttpClient's. As soon as RealCall.cancel() fires
-      // EventListener.canceled, we tear down the QUIC stream — no polling thread needed.
-      CancellationHook.attach(call) { pooled.cancelStream(stream) }
+      val stream = pooled.openStream(reqHeaders, bufferedBody, streamingBody = isDuplex)
+      streamRef.set(stream)
       eventListener.requestHeadersEnd(call, request)
 
       if (isDuplex) {
@@ -167,7 +172,12 @@ internal class Quiche4jCallServer(
       return response
     } finally {
       if (!returnedSuccessfully) {
-        stream?.let { pooled.releaseStream(it) }
+        streamRef.get()?.let {
+          // Send STOP_SENDING + RESET_STREAM so the remote doesn't keep producing bytes for
+          // an abandoned stream (and chewing up connection-level flow control).
+          pooled.cancelStream(it)
+          pooled.releaseStream(it)
+        }
         eventListener.connectionReleased(call, handle)
       }
       // On success, lifecycle continues via QuicBodySource.close().
