@@ -25,7 +25,7 @@ import okhttp3.WebSocketListener
  * via [FailoverWebSocketFactory]:
  *
  * ```kotlin
- * val quiche = Quiche4jWebSocketFactory.Builder().client(okHttpClient).build()
+ * val quiche = Quiche4jWebSocketFactory.Builder(okHttpClient).build()
  * val factory = FailoverWebSocketFactory(primary = quiche, secondary = okHttpClient)
  * val ws = factory.newWebSocket(request, listener)
  * ```
@@ -81,23 +81,27 @@ class Quiche4jWebSocketFactory internal constructor(
     return proxy
   }
 
-  class Builder {
-    private var client: OkHttpClient? = null
+  /**
+   * @param client The [OkHttpClient] whose TLS trust, hostname verifier, DNS, and timeouts
+   *   configure the HTTP/3 handshake. Deliberately required: this factory reuses the
+   *   client's Dispatcher executor and connection pool, and we don't want to silently
+   *   create (and therefore leak) one on the caller's behalf. Reuse an existing client
+   *   so its `dispatcher.executorService.shutdown()` / `connectionPool.evictAll()`
+   *   lifecycle covers both surfaces.
+   */
+  class Builder(
+    private val client: OkHttpClient,
+  ) {
     private var connectExecutor: Executor? = null
     private var httpsRecordResolver: HttpsServiceRecordResolver? = null
     private var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
 
     /**
-     * The [OkHttpClient] whose TLS trust, hostname verifier, DNS, and timeouts configure
-     * the HTTP/3 handshake. Defaults to a new `OkHttpClient.Builder().build()`.
+     * The executor that runs the H/3 handshake. Defaults to the client's Dispatcher
+     * executor — the same pool that [OkHttpClient] uses for async calls, so the caller
+     * already owns its shutdown.
      */
-    fun client(client: OkHttpClient) = apply { this.client = client }
-
-    /**
-     * The executor that runs the H/3 handshake. Defaults to the [client]'s Dispatcher
-     * executor — the same pool that [OkHttpClient] uses for async calls.
-     */
-    fun connectExecutor(executor: Executor) = apply { this.connectExecutor = executor }
+    fun connectExecutor(executor: Executor): Builder = apply { this.connectExecutor = executor }
 
     /**
      * Optional HTTPS DNS record (RFC 9460) resolver. If set, the factory consults it to
@@ -106,7 +110,7 @@ class Quiche4jWebSocketFactory internal constructor(
      * [HttpsAware], or when you pair this factory with [FailoverWebSocketFactory] and
      * don't mind a speculative attempt.
      */
-    fun httpsServiceRecordResolver(resolver: HttpsServiceRecordResolver?) =
+    fun httpsServiceRecordResolver(resolver: HttpsServiceRecordResolver?): Builder =
       apply { this.httpsRecordResolver = resolver }
 
     /**
@@ -114,14 +118,13 @@ class Quiche4jWebSocketFactory internal constructor(
      * with a [Quiche4jInterceptor] on the same [OkHttpClient] so both surfaces see the
      * same advertised alternatives. Defaults to [InMemoryAltSvcCache].
      */
-    fun altSvcCache(cache: AltSvcCache) = apply { this.altSvcCache = cache }
+    fun altSvcCache(cache: AltSvcCache): Builder = apply { this.altSvcCache = cache }
 
     fun build(): Quiche4jWebSocketFactory {
-      val c = client ?: OkHttpClient.Builder().build()
-      val e: Executor = connectExecutor ?: c.dispatcher.executorService
+      val e: Executor = connectExecutor ?: client.dispatcher.executorService
       return Quiche4jWebSocketFactory(
         engine = Quiche4jEngine(),
-        client = c,
+        client = client,
         connectExecutor = e,
         httpsRecordResolver = httpsRecordResolver,
         altSvcCache = altSvcCache,

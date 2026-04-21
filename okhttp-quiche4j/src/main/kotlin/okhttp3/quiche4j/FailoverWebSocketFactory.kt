@@ -26,7 +26,7 @@ import okio.ByteString
  * quiche4j is:
  *
  * ```kotlin
- * val quiche = Quiche4jWebSocketFactory.Builder().client(okHttpClient).build()
+ * val quiche = Quiche4jWebSocketFactory.Builder(okHttpClient).build()
  * val factory = FailoverWebSocketFactory(primary = quiche, secondary = okHttpClient)
  * val ws = factory.newWebSocket(request, listener)
  * ```

@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test
 
 class Quiche4jWebSocketFactoryTest {
   @Test fun `plaintext ws is rejected by the H3-only factory`() {
-    val factory = Quiche4jWebSocketFactory.Builder().client(OkHttpClient()).build()
+    val factory = Quiche4jWebSocketFactory.Builder(OkHttpClient()).build()
     val request = Request.Builder().url("http://example.test/chat").build()
     try {
       factory.newWebSocket(request, NoopListener)
@@ -48,8 +48,7 @@ class Quiche4jWebSocketFactoryTest {
     val latchExec = CapturingExecutor()
     val factory =
       Quiche4jWebSocketFactory
-        .Builder()
-        .client(OkHttpClient())
+        .Builder(OkHttpClient())
         .connectExecutor(latchExec)
         .build()
     val listenerRecord = RecordingListener()
@@ -68,8 +67,7 @@ class Quiche4jWebSocketFactoryTest {
     val inline = Executor { it.run() }
     val factory =
       Quiche4jWebSocketFactory
-        .Builder()
-        .client(OkHttpClient())
+        .Builder(OkHttpClient())
         .connectExecutor(inline)
         .build()
     val listener = RecordingListener()
@@ -108,8 +106,7 @@ class Quiche4jWebSocketFactoryTest {
       }
     val factory =
       Quiche4jWebSocketFactory
-        .Builder()
-        .client(OkHttpClient())
+        .Builder(OkHttpClient())
         .connectExecutor(inline)
         .httpsServiceRecordResolver(resolverWithoutH3)
         .build()
@@ -139,8 +136,7 @@ class Quiche4jWebSocketFactoryTest {
       }
     val factory =
       Quiche4jWebSocketFactory
-        .Builder()
-        .client(OkHttpClient())
+        .Builder(OkHttpClient())
         .connectExecutor(inline)
         .httpsServiceRecordResolver(resolverWithoutH3)
         .build()
@@ -167,8 +163,7 @@ class Quiche4jWebSocketFactoryTest {
     val inline = Executor { it.run() }
     val factory =
       Quiche4jWebSocketFactory
-        .Builder()
-        .client(OkHttpClient())
+        .Builder(OkHttpClient())
         .connectExecutor(inline)
         .build()
     val listener = RecordingListener()
