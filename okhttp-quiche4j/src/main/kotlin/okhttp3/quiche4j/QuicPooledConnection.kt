@@ -89,6 +89,7 @@ internal class QuicPooledConnection private constructor(
   fun openStream(
     headers: List<Http3Header>,
     body: ByteArray?,
+    streamingBody: Boolean = false,
   ): QuicStream {
     activeCount.incrementAndGet()
     val streamHolder = java.util.concurrent.atomic.AtomicReference<QuicStream>()
@@ -97,7 +98,7 @@ internal class QuicPooledConnection private constructor(
 
     submit {
       try {
-        val hasBody = body != null
+        val hasBody = body != null || streamingBody
         val streamId: Long = h3.sendRequest(headers.toTypedArray(), !hasBody)
         if (streamId < 0) throw IOException("quiche4j sendRequest failed: $streamId")
         val stream = QuicStream(streamId, this)
@@ -130,6 +131,36 @@ internal class QuicPooledConnection private constructor(
   fun releaseStream(stream: QuicStream) {
     streams.remove(stream.streamId, stream)
     activeCount.decrementAndGet()
+  }
+
+  /**
+   * Write a chunk of the request body on the I/O thread. Returns the number of bytes quiche
+   * accepted (may be less than [bytes].size if the stream is flow-control-blocked). Used by
+   * [QuicRequestBodySink] for duplex request bodies.
+   */
+  fun sendBodyChunk(
+    stream: QuicStream,
+    bytes: ByteArray,
+    fin: Boolean,
+  ): Long {
+    val holder = java.util.concurrent.atomic.AtomicReference<Any?>()
+    val latch = java.util.concurrent.CountDownLatch(1)
+    submit {
+      try {
+        val n = h3.sendBody(stream.streamId, bytes, fin)
+        holder.set(n)
+      } catch (t: Throwable) {
+        holder.set(t)
+      } finally {
+        latch.countDown()
+      }
+    }
+    latch.await()
+    return when (val r = holder.get()) {
+      is Long -> r
+      is Throwable -> throw r as? IOException ?: IOException(r)
+      else -> throw IOException("sendBodyChunk: unexpected result $r")
+    }
   }
 
   /**

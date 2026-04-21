@@ -100,17 +100,46 @@ internal class Quiche4jCallServer(
     try {
       eventListener.requestHeadersStart(call)
       val reqHeaders = buildH3Request(request)
-      val hasBody = request.body != null
-      val body: ByteArray? =
-        if (hasBody) Buffer().also { request.body!!.writeTo(it) }.readByteArray() else null
+      val rawBody = request.body
+      val isDuplex = rawBody?.isDuplex() == true
+      val hasBody = rawBody != null
+      val bufferedBody: ByteArray? =
+        if (hasBody && !isDuplex) {
+          Buffer().also { rawBody!!.writeTo(it) }.readByteArray()
+        } else {
+          null
+        }
       if (hasBody) eventListener.requestBodyStart(call)
-      stream = pooled.openStream(reqHeaders, body)
+      stream = pooled.openStream(reqHeaders, bufferedBody, streamingBody = isDuplex)
       // Push-based cancellation: Call.addEventListener composes an extra EventListener onto
       // the call without disturbing the OkHttpClient's. As soon as RealCall.cancel() fires
       // EventListener.canceled, we tear down the QUIC stream — no polling thread needed.
       CancellationHook.attach(call) { pooled.cancelStream(stream) }
       eventListener.requestHeadersEnd(call, request)
-      if (hasBody) eventListener.requestBodyEnd(call, (body?.size ?: 0).toLong())
+
+      if (isDuplex) {
+        // Duplex body: run RequestBody.writeTo(sink) on a worker thread so we can return the
+        // Response as soon as headers arrive. The sink forwards writes to the pool's I/O thread
+        // via sendBodyChunk, so quiche stays single-threaded per connection.
+        val sink = QuicRequestBodySink(stream, pooled).buffer()
+        val duplexThread =
+          Thread({
+            try {
+              rawBody!!.writeTo(sink)
+              sink.close()
+              eventListener.requestBodyEnd(call, -1L) // byte count unknown for streaming bodies
+            } catch (t: Throwable) {
+              pooled.cancelStream(stream)
+              eventListener.requestFailed(call, t as? java.io.IOException ?: java.io.IOException(t))
+            }
+          }, "quiche4j-duplex-${call.request().url.host}")
+        duplexThread.isDaemon = true
+        duplexThread.start()
+      } else if (!hasBody) {
+        // No body — headers were sent with fin=true.
+      } else {
+        eventListener.requestBodyEnd(call, (bufferedBody?.size ?: 0).toLong())
+      }
 
       eventListener.responseHeadersStart(call)
       val responseHeaders = stream.headersFuture.get()
