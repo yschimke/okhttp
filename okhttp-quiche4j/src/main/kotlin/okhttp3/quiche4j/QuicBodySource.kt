@@ -47,8 +47,14 @@ internal class QuicBodySource(
   private var startedReading: Boolean = false
   private var endedReading: Boolean = false
   private var bytesRead: Long = 0
-  private var currentChunk: ByteArray? = null
-  private var currentOffset: Int = 0
+
+  /**
+   * The [Buffer] we're currently draining into the caller's sink. Replaced when empty by
+   * the next [BodyEvent.Bytes] pulled off the stream's queue. Kept as a field rather
+   * than pulled-per-read because a caller that asks for fewer bytes than one chunk holds
+   * needs to come back for the rest on the next read.
+   */
+  private var currentChunk: Buffer? = null
   private var reachedEnd: Boolean = false
 
   override fun read(
@@ -62,12 +68,12 @@ internal class QuicBodySource(
       eventListener.responseBodyStart(call)
     }
 
-    if (reachedEnd && currentChunk == null) {
+    if (reachedEnd && (currentChunk == null || currentChunk!!.size == 0L)) {
       finishRead(ioEx = null)
       return -1L
     }
 
-    if (currentChunk == null) {
+    if (currentChunk == null || currentChunk!!.size == 0L) {
       when (val event =
         try {
           awaitBodyEvent()
@@ -80,10 +86,7 @@ internal class QuicBodySource(
           finishRead(te)
           throw te
         }) {
-        is BodyEvent.Bytes -> {
-          currentChunk = event.data
-          currentOffset = 0
-        }
+        is BodyEvent.Bytes -> currentChunk = event.data
         is BodyEvent.End -> {
           reachedEnd = true
           finishRead(ioEx = null)
@@ -98,16 +101,14 @@ internal class QuicBodySource(
     }
 
     val chunk = currentChunk!!
-    val remaining = chunk.size - currentOffset
-    val toWrite = minOf(remaining.toLong(), byteCount).toInt()
-    sink.write(chunk, currentOffset, toWrite)
-    currentOffset += toWrite
+    val toWrite = minOf(chunk.size, byteCount)
+    // sink.write(source, byteCount) transfers whole segments from `chunk` into `sink`
+    // when they're aligned — so the bytes the I/O thread wrote into `chunk`'s segments
+    // are moved (not copied) all the way to the caller's ResponseBody. At misaligned or
+    // sub-segment boundaries okio falls back to a byte copy, which is what we had before.
+    sink.write(chunk, toWrite)
     bytesRead += toWrite
-    if (currentOffset >= chunk.size) {
-      currentChunk = null
-      currentOffset = 0
-    }
-    return toWrite.toLong()
+    return toWrite
   }
 
   override fun close() {

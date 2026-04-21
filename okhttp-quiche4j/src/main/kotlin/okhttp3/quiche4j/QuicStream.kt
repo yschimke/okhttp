@@ -12,6 +12,7 @@ package okhttp3.quiche4j
 import java.io.IOException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.LinkedBlockingQueue
+import okio.Buffer
 
 /**
  * Per-request state on a pooled [QuicPooledConnection]. The connection's I/O thread produces
@@ -38,8 +39,15 @@ internal class QuicStream(
     headersFuture.complete(ResponseHeaders(status, headers))
   }
 
-  fun deliverBody(bytes: ByteArray) {
-    bodyQueue.put(BodyEvent.Bytes(bytes))
+  /**
+   * Enqueue a body chunk. Takes [Buffer] ownership: the caller must not touch [data]
+   * again after this call. Consumers drain it via [okio.BufferedSink.write] which does
+   * segment-level transfer at aligned boundaries, so the bytes copied into [data] by
+   * the producer stay put all the way through to the user's `ResponseBody` (or
+   * WebSocket frame reader) without a second byte copy.
+   */
+  fun deliverBody(data: Buffer) {
+    bodyQueue.put(BodyEvent.Bytes(data))
   }
 
   fun deliverEnd() {
@@ -61,8 +69,14 @@ internal data class ResponseHeaders(
 )
 
 internal sealed class BodyEvent {
+  /**
+   * Holds body bytes as an [okio.Buffer] so the consuming source can forward segments
+   * directly to the caller's sink via [okio.BufferedSink.write] (zero-copy at segment
+   * boundaries). The buffer is owned by the event — the consumer drains it; producers
+   * must not retain a reference after enqueueing.
+   */
   class Bytes(
-    val data: ByteArray,
+    val data: Buffer,
   ) : BodyEvent()
 
   object End : BodyEvent()

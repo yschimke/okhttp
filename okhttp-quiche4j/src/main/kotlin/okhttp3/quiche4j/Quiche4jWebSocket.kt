@@ -398,8 +398,7 @@ private class WebSocketStreamSource(
   private val stream: QuicStream,
 ) : Source {
   @Volatile private var closed: Boolean = false
-  private var currentChunk: ByteArray? = null
-  private var currentOffset: Int = 0
+  private var currentChunk: Buffer? = null
   private var reachedEnd: Boolean = false
 
   override fun read(
@@ -408,9 +407,9 @@ private class WebSocketStreamSource(
   ): Long {
     check(byteCount >= 0) { "byteCount < 0: $byteCount" }
     if (closed) throw IOException("stream closed")
-    if (reachedEnd && currentChunk == null) return -1L
+    if (reachedEnd && (currentChunk == null || currentChunk!!.size == 0L)) return -1L
 
-    if (currentChunk == null) {
+    if (currentChunk == null || currentChunk!!.size == 0L) {
       when (val event =
         try {
           stream.bodyQueue.take()
@@ -418,10 +417,7 @@ private class WebSocketStreamSource(
           Thread.currentThread().interrupt()
           throw IOException("interrupted while reading H/3 WebSocket body")
         }) {
-        is BodyEvent.Bytes -> {
-          currentChunk = event.data
-          currentOffset = 0
-        }
+        is BodyEvent.Bytes -> currentChunk = event.data
         is BodyEvent.End -> {
           reachedEnd = true
           return -1L
@@ -434,15 +430,11 @@ private class WebSocketStreamSource(
     }
 
     val chunk = currentChunk!!
-    val remaining = chunk.size - currentOffset
-    val toWrite = minOf(remaining.toLong(), byteCount).toInt()
-    sink.write(chunk, currentOffset, toWrite)
-    currentOffset += toWrite
-    if (currentOffset >= chunk.size) {
-      currentChunk = null
-      currentOffset = 0
-    }
-    return toWrite.toLong()
+    val toWrite = minOf(chunk.size, byteCount)
+    // Segment-level transfer when aligned — the frame bytes the I/O thread wrote into
+    // `chunk` move straight into `sink` for WebSocketReader to consume.
+    sink.write(chunk, toWrite)
+    return toWrite
   }
 
   override fun close() {

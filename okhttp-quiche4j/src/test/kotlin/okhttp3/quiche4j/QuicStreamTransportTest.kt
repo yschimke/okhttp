@@ -35,8 +35,8 @@ class QuicStreamTransportTest {
 
   @Test fun `source drains one chunk per BodyEvent_Bytes`() {
     val stream = newStream()
-    stream.deliverBody(byteArrayOf(1, 2, 3))
-    stream.deliverBody(byteArrayOf(4, 5))
+    stream.deliverBody(Buffer().apply { write(byteArrayOf(1, 2, 3)) })
+    stream.deliverBody(Buffer().apply { write(byteArrayOf(4, 5)) })
     stream.deliverEnd()
 
     val source = QuicBodySourceForTests(stream)

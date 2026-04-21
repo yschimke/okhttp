@@ -339,11 +339,14 @@ internal class QuicPooledConnection private constructor(
           override fun onData(sid: Long) {
             val stream = streams[sid] ?: return
             // Stream each recvBody chunk as its own BodyEvent. recvBuf is reused each pass
-            // so copy out before the next recvBody call can overwrite it.
+            // so we must hand the bytes to the stream in a container the I/O loop won't
+            // touch again — an okio.Buffer, so the consumer's sink.write(buffer, n) can
+            // transfer segments instead of doing a second byte copy.
             while (true) {
               val n = h3.recvBody(sid, recvBuf)
               if (n <= 0) break
-              stream.deliverBody(recvBuf.copyOfRange(0, n))
+              val chunk = okio.Buffer().apply { write(recvBuf, 0, n) }
+              stream.deliverBody(chunk)
             }
           }
 
