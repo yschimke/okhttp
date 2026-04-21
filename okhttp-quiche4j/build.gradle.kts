@@ -20,14 +20,17 @@ dependencies {
 
   testImplementation(projects.okhttpTestingSupport)
   testImplementation(projects.mockwebserver3)
+  testImplementation(projects.okhttpTls)
   testImplementation(libs.junit)
+  testImplementation(libs.junit.jupiter.api)
+  testImplementation(libs.junit.jupiter.engine)
+  testImplementation(libs.junit.jupiter.params)
   testImplementation(libs.kotlin.test.common)
   testImplementation(libs.kotlin.test.junit)
   testImplementation(libs.assertk)
 }
 
 tasks.withType<Test>().configureEach {
-  // Surface println-style diagnostics from the interceptor so the live test is debuggable.
   testLogging {
     events(
       org.gradle.api.tasks.testing.logging.TestLogEvent.PASSED,

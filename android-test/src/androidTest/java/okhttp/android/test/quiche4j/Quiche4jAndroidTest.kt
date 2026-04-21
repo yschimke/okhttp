@@ -19,6 +19,7 @@ import java.security.cert.X509Certificate
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.quiche4j.AndroidHttpsServiceRecordResolver
 import okhttp3.quiche4j.Http3Preference
 import okhttp3.quiche4j.HttpsAware
 import okhttp3.quiche4j.HttpsAwareDns

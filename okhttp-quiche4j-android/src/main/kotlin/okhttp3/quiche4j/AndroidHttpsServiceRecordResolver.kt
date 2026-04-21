@@ -7,7 +7,7 @@
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
-package okhttp.android.test.quiche4j
+package okhttp3.quiche4j
 
 import android.net.DnsResolver
 import android.os.CancellationSignal
@@ -15,13 +15,11 @@ import androidx.annotation.RequiresApi
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import okhttp3.quiche4j.HttpsServiceRecord
-import okhttp3.quiche4j.HttpsServiceRecordResolver
 import okio.ByteString.Companion.toByteString
 import org.xbill.DNS.HTTPSRecord
 import org.xbill.DNS.Message
-import org.xbill.DNS.Section
 import org.xbill.DNS.SVCBBase
+import org.xbill.DNS.Section
 
 /**
  * [HttpsServiceRecordResolver] for Android API 29+ that routes HTTPS (SVCB type 65) DNS queries

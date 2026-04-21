@@ -94,7 +94,7 @@ dependencies {
   androidTestImplementation(projects.okhttpSse)
   androidTestImplementation(projects.okhttpTls)
   androidTestImplementation(projects.okhttpQuiche4j)
-  androidTestImplementation(libs.dnsjava)
+  androidTestImplementation(projects.okhttpQuiche4jAndroid)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.http.client5)

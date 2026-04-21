@@ -92,6 +92,7 @@ val sdkDir = localProperties.getProperty("sdk.dir")
 if (androidHome != null || sdkDir != null) {
   include(":android-test")
   include(":android-test-app")
+  include(":okhttp-quiche4j-android")
 }
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
