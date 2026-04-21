@@ -473,14 +473,20 @@ already-landed `peer_cert_chain` and `application_proto` bindings.
   this needs an upstream quiche PR adding a `Connection::cipher()` (or
   similar) first, and then a JNI binding here. Today the `Handshake` we
   build is pinned to `TLS_1_3 / TLS_AES_128_GCM_SHA256`.
-- **ECH support.** quiche 0.26.1 does **not** expose a native ECH API. It
-  does expose `Config::with_boring_ssl_ctx_builder` which lets us pass a
-  pre-configured BoringSSL context, and BoringSSL has
-  `SSL_set1_ech_config_list`. So the path is: add a JNI binding that
-  accepts a Java-side callback or config bytes and routes them into the
-  underlying `SslContextBuilder`, then feed `HttpsServiceRecord.echConfigList`
-  through. If quiche upstream adds a first-class ECH API, we use that
-  instead.
+- **ECH support.** Investigated and **blocked on an upstream quiche change**.
+  quiche 0.26.1 has no native ECH API. Its `with_boring_ssl_ctx_builder`
+  escape hatch takes a boring `SslContextBuilder`, but BoringSSL's
+  client-side ECH config lives on the `SSL` object
+  (`SSL_set1_ech_config_list`), not on `SSL_CTX`. quiche's
+  `with_boring_ssl_ctx_builder` only exposes the context; there's no hook
+  for per-connection SSL setup between SSL creation and handshake start.
+  Building with `features = ["boringssl-boring-crate"]` compiles clean
+  but doesn't buy us a usable hook. Real path forward: a quiche PR adding
+  either a first-class `Config::set_ech_config_list` API or a per-SSL
+  setup callback. Our HTTPS-record resolver already parses
+  [`echConfigList`](src/main/kotlin/okhttp3/quiche4j/HttpsServiceRecord.kt),
+  so the okhttp-side plumbing is ready to feed bytes once the upstream
+  supports it.
 
 ---
 
