@@ -197,6 +197,7 @@ internal class Quiche4jCallServer(
               .apply { responseHeaders.headers.forEach { (n, v) -> add(n, v) } }
               .build(),
           ).body(bodyOf(stream, contentType, eventListener, call, handle, chain.readTimeoutMillis().toLong()))
+          .trailers(Quiche4jTrailersSource(stream))
           .sentRequestAtMillis(sentAt)
           .receivedResponseAtMillis(System.currentTimeMillis())
           .handshake(pooled.handshake)
@@ -229,6 +230,31 @@ internal class Quiche4jCallServer(
   ): ResponseBody {
     val source = QuicBodySource(stream, eventListener, call, handle, readTimeoutMillis).buffer()
     return source.asResponseBody(contentType, -1L)
+  }
+
+  /**
+   * Bridges [QuicStream.trailersFuture] into OkHttp's [okhttp3.TrailersSource] contract.
+   * [peek] is non-blocking and returns null until the body is fully drained (which is
+   * what signals the trailer event on the wire); [get] blocks on the future.
+   */
+  private class Quiche4jTrailersSource(
+    private val stream: QuicStream,
+  ) : okhttp3.TrailersSource {
+    override fun peek(): okhttp3.Headers? =
+      if (stream.trailersFuture.isDone) resolve() else null
+
+    override fun get(): okhttp3.Headers = resolve()
+
+    private fun resolve(): okhttp3.Headers =
+      try {
+        stream.trailersFuture.get()
+      } catch (e: java.util.concurrent.ExecutionException) {
+        val cause = e.cause ?: e
+        throw cause as? IOException ?: IOException(cause)
+      } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        throw java.io.InterruptedIOException("interrupted waiting for HTTP/3 trailers")
+      }
   }
 
   /**

@@ -12,6 +12,7 @@ package okhttp3.quiche4j
 import assertk.assertThat
 import assertk.assertions.isEqualTo
 import assertk.assertions.isGreaterThan
+import assertk.assertions.isNull
 import assertk.assertions.messageContains
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -85,19 +86,32 @@ class QuicStreamTransportTest {
   }
 
   /**
-   * Trailers in HTTP/3 arrive as a second `Headers` event on the same stream. Our code
-   * uses `CompletableFuture.complete(...)` for headers, which is idempotent — the second
-   * complete is dropped. Pin that behaviour: the FIRST headers win, trailers are silently
-   * ignored (with the kdoc on QuicStream calling this out).
+   * Trailers in HTTP/3 arrive as a second `Headers` event on the same stream (RFC 9114
+   * §4.1). First headers → `headersFuture`; second headers → `trailersFuture`. Pseudo-
+   * header fields ("`:...`") must not appear in trailers and are dropped defensively.
    */
-  @Test fun `trailers after headers are silently dropped`() {
+  @Test fun `trailers arrive as a second headers event and populate trailersFuture`() {
     val stream = newStream()
     stream.deliverHeaders(200, listOf("content-type" to "text/plain"))
-    stream.deliverHeaders(200, listOf("x-trailer" to "after"))
+    // Second onHeaders = trailers. The -1 status is what the wire parser produces when
+    // the frame has no :status pseudo-header (i.e. trailers).
+    stream.deliverHeaders(-1, listOf(":dropped" to "x", "grpc-status" to "0"))
 
     val headers = stream.headersFuture.get()
     assertThat(headers.status).isEqualTo(200)
     assertThat(headers.headers).isEqualTo(listOf("content-type" to "text/plain"))
+
+    val trailers = stream.trailersFuture.get()
+    assertThat(trailers["grpc-status"]).isEqualTo("0")
+    // Pseudo-header fields (leading ":") are disallowed in trailers.
+    assertThat(trailers[":dropped"]).isNull()
+  }
+
+  @Test fun `stream end without trailers completes trailersFuture empty`() {
+    val stream = newStream()
+    stream.deliverHeaders(200, listOf("content-type" to "text/plain"))
+    stream.deliverEnd()
+    assertThat(stream.trailersFuture.get().size).isEqualTo(0)
   }
 
   /**

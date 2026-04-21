@@ -127,9 +127,12 @@ bugs, tests we lack, or kdoc improvements.
   the caller; no direct test.
 - **`OkHostnameVerifier` cert-path vs generic-session-path branches
   in `verifyPeer`.** Both untested.
-- **Trailers.** quiche4j may emit a second `Headers` event; our code
-  silently drops it because `headersFuture.complete(...)` is a no-op
-  after first completion. Pin behaviour + document.
+- **FIXED — Trailers.** A second `onHeaders` event now routes into
+  `QuicStream.trailersFuture`, wired into `Response.Builder.trailers`
+  via a `TrailersSource` adapter. Pseudo-headers (":…") are dropped
+  defensively per RFC 9114 §4.1.1. End-of-stream without trailers
+  completes the future with `Headers.EMPTY` so `response.trailers()`
+  doesn't block forever.
 - **Non-200 responses and empty bodies.** 404 / HEAD / 500 with
   content-length-but-no-body exercises `BodyEvent.End`-first paths that
   are untested.
