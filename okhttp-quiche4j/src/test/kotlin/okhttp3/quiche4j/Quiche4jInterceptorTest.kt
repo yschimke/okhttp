@@ -98,6 +98,26 @@ class Quiche4jInterceptorTest {
     assertThat(fired.get()).isFalse()
   }
 
+  @Test fun `CancellationHook fires synchronously when Call was already cancelled`() {
+    // The race the interceptor worries about: Call.cancel() fires before the interceptor
+    // reaches CancellationHook.attach. In that window the Call's existing listeners have
+    // already been notified, so a newly-added listener would miss canceled(). The hook's
+    // post-register `call.isCanceled()` check catches this: attach() fires onCancel
+    // synchronously on the attaching thread.
+    val client = OkHttpClient.Builder().build()
+    val call = client.newCall(Request.Builder().url("https://example.com/").build())
+    call.cancel()
+
+    val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+    val thread = java.util.concurrent.atomic.AtomicReference<Thread>()
+    CancellationHook.attach(call) {
+      fired.set(true)
+      thread.set(Thread.currentThread())
+    }
+    assertThat(fired.get()).isTrue()
+    assertThat(thread.get()).isEqualTo(Thread.currentThread())
+  }
+
   @Test fun `Http3Preference ForceOff makes the interceptor fall through`() {
     val interceptor = Quiche4jInterceptor.Builder().build()
     val fell = java.util.concurrent.atomic.AtomicBoolean(false)

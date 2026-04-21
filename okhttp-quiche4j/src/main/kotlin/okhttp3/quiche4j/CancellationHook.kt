@@ -23,21 +23,32 @@ import okhttp3.EventListener
  */
 internal object CancellationHook {
   /**
-   * Registers [onCancel] to fire when [call] is cancelled. Safe to call multiple times per call;
-   * each [onCancel] fires at most once, on the thread that invokes `Call.cancel()`.
+   * Registers [onCancel] to fire when [call] is cancelled. Safe to call multiple times per
+   * call; each [onCancel] fires at most once, on the thread that invokes `Call.cancel()`
+   * — *or* synchronously on the current thread if the call was already cancelled before
+   * this method was invoked.
+   *
+   * The synchronous path covers the race where the caller cancels `Call` between the
+   * interceptor reading `chain.request()` and reaching this method: in that window the
+   * event listeners on `call` have already been notified, so a newly-added listener
+   * would never see `canceled()`. Without the post-register `isCanceled()` check the
+   * hook would silently no-op and the QUIC handshake would proceed for a call the user
+   * had asked us to drop.
    */
   fun attach(
     call: Call,
     onCancel: () -> Unit,
   ) {
+    val fired = java.util.concurrent.atomic.AtomicBoolean(false)
     call.addEventListener(
       object : EventListener() {
-        private val fired = java.util.concurrent.atomic.AtomicBoolean(false)
-
         override fun canceled(call: Call) {
           if (fired.compareAndSet(false, true)) onCancel()
         }
       },
     )
+    // Catch the "cancelled before we attached (or concurrently)" case. `fired` makes
+    // double-invocation safe if the listener also wins the race.
+    if (call.isCanceled() && fired.compareAndSet(false, true)) onCancel()
   }
 }
