@@ -81,7 +81,7 @@ val client = OkHttpClient.Builder()
 
 val request = Request.Builder()
   .url("https://cloudflare-quic.com/")
-  .tag(Http3Preference::class.java, Http3Preference.Current)       // optional
+  .tag<Http3Preference>(Http3Preference.Current)                    // optional
   .build()
 ```
 

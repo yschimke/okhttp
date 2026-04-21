@@ -95,7 +95,7 @@ class Quiche4jAndroidTest {
       Request
         .Builder()
         .url("https://cloudflare-quic.com/")
-        .tag(Http3Preference::class.java, Http3Preference.Force())
+        .tag<Http3Preference>(Http3Preference.Force())
         .build()
     client.newCall(request).execute().use { response ->
       Log.i(tag, "forced protocol=${response.protocol} code=${response.code}")

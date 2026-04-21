@@ -116,7 +116,7 @@ class Quiche4jInterceptorTest {
       Request
         .Builder()
         .url("https://cloudflare-quic.com/")
-        .tag(Http3Preference::class.java, Http3Preference.ForceOff)
+        .tag<Http3Preference>(Http3Preference.ForceOff)
         .build()
     client.newCall(request).execute().use { resp ->
       assertThat(fell.get()).isTrue()
@@ -151,7 +151,7 @@ class Quiche4jInterceptorTest {
       Request
         .Builder()
         .url("https://cloudflare-quic.com/")
-        .tag(Http3Preference::class.java, Http3Preference.Force())
+        .tag<Http3Preference>(Http3Preference.Force())
         .build()
     client.newCall(request).execute().use { resp ->
       assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)
@@ -224,7 +224,7 @@ class Quiche4jInterceptorTest {
       Request
         .Builder()
         .url("https://cloudflare-quic.com/")
-        .tag(Http3Preference::class.java, Http3Preference.Current)
+        .tag<Http3Preference>(Http3Preference.Current)
         .build()
     client.newCall(request).execute().use { resp ->
       assertThat(resp.protocol).isEqualTo(okhttp3.Protocol.HTTP_3)

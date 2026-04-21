@@ -16,9 +16,13 @@ import java.util.concurrent.ConcurrentHashMap
  * me via h3 on :443" hint survives into later calls and lets [Quiche4jInterceptor] prefer
  * HTTP/3 on the next connect.
  *
- * Implementations must be thread-safe. Default implementation is [InMemoryAltSvcCache]; for
- * persistence across process restarts, write a wrapper that delegates [get]/[put]/[remove] to
- * the in-memory cache and also mirrors the state to disk (see [snapshot] / [load]).
+ * Implementations must be thread-safe. Default implementation is [InMemoryAltSvcCache].
+ *
+ * For a persistent cache, implement these three methods on top of the target store (SQLite,
+ * Room, a file, etc.) — nothing else is required from the interceptor's perspective. Bulk
+ * snapshot/load support is a property of the in-memory impl only (see
+ * [InMemoryAltSvcCache.snapshot] / [InMemoryAltSvcCache.load]); a real database doesn't need
+ * "load everything at startup" because it can answer [get] directly from disk.
  */
 interface AltSvcCache {
   /** All non-expired entries for [origin], or an empty list. */
@@ -34,19 +38,15 @@ interface AltSvcCache {
   )
 
   fun remove(origin: AltSvcOrigin)
-
-  /**
-   * Snapshot of all currently stored non-expired entries, intended for serialization. The
-   * companion [load] reverses this.
-   */
-  fun snapshot(): Map<AltSvcOrigin, List<AltSvcEntry>>
-
-  /** Populate the cache from a previously taken [snapshot]. Entries with expired `ma` are dropped. */
-  fun load(entries: Map<AltSvcOrigin, List<AltSvcEntry>>)
 }
 
 /**
  * Default in-memory [AltSvcCache]. Thread-safe; expired entries are pruned lazily on read.
+ *
+ * [snapshot] and [load] are provided here (rather than on the [AltSvcCache] interface) as a
+ * convenience for callers who want to persist the cache across process restarts by writing
+ * the snapshot to their own store. Implementations backed by an external database don't need
+ * these methods — they can satisfy [get] from disk directly.
  */
 class InMemoryAltSvcCache : AltSvcCache {
   private val map = ConcurrentHashMap<AltSvcOrigin, List<AltSvcEntry>>()
@@ -75,12 +75,17 @@ class InMemoryAltSvcCache : AltSvcCache {
     map.remove(origin)
   }
 
-  override fun snapshot(): Map<AltSvcOrigin, List<AltSvcEntry>> =
+  /**
+   * Snapshot of all currently stored non-expired entries, intended for serialization. The
+   * companion [load] reverses this.
+   */
+  fun snapshot(): Map<AltSvcOrigin, List<AltSvcEntry>> =
     map
       .mapValues { (_, v) -> v.filterNot { it.isExpired } }
       .filterValues { it.isNotEmpty() }
 
-  override fun load(entries: Map<AltSvcOrigin, List<AltSvcEntry>>) {
+  /** Populate the cache from a previously taken [snapshot]. Entries with expired `ma` are dropped. */
+  fun load(entries: Map<AltSvcOrigin, List<AltSvcEntry>>) {
     for ((origin, values) in entries) {
       val live = values.filterNot { it.isExpired }
       if (live.isNotEmpty()) map[origin] = live

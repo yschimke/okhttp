@@ -13,6 +13,9 @@ import io.quiche4j.http3.Http3Header
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import javax.net.ssl.X509TrustManager
 import okhttp3.Headers
 import okhttp3.Interceptor
@@ -118,7 +121,16 @@ internal class Quiche4jCallServer(
           null
         }
       if (hasBody) eventListener.requestBodyStart(call)
-      val stream = pooled.openStream(reqHeaders, bufferedBody, streamingBody = isDuplex)
+      // connectTimeoutMillis is a conservative ceiling on how long we wait for the pool's I/O
+      // thread to pick up the sendRequest task — in practice microseconds. If we exceed it,
+      // the I/O thread has wedged and we'd hang forever without a bound.
+      val stream =
+        pooled.openStream(
+          reqHeaders,
+          bufferedBody,
+          streamingBody = isDuplex,
+          timeoutMillis = chain.connectTimeoutMillis().toLong(),
+        )
       streamRef.set(stream)
       eventListener.requestHeadersEnd(call, request)
 
@@ -130,7 +142,7 @@ internal class Quiche4jCallServer(
         // falls through to read response headers. QuicRequestBodySink's writes hop onto the
         // pool's I/O thread so quiche stays single-threaded per connection — no extra thread
         // of our own.
-        val sink = QuicRequestBodySink(stream, pooled).buffer()
+        val sink = QuicRequestBodySink(stream, pooled, chain.writeTimeoutMillis().toLong()).buffer()
         rawBody!!.writeTo(sink)
         // Do NOT close the sink here — for duplex, the application closes it when its async
         // producer finishes. requestBodyEnd will fire when the sink is closed.
@@ -141,7 +153,25 @@ internal class Quiche4jCallServer(
       }
 
       eventListener.responseHeadersStart(call)
-      val responseHeaders = stream.headersFuture.get()
+      // readTimeout bounds how long we wait for the peer to send :status. OkHttp's convention
+      // is readTimeout=0 → no timeout, so preserve that by calling get() without a bound.
+      val readTimeoutMs = chain.readTimeoutMillis().toLong()
+      val responseHeaders =
+        try {
+          if (readTimeoutMs <= 0L) {
+            stream.headersFuture.get()
+          } else {
+            stream.headersFuture.get(readTimeoutMs, TimeUnit.MILLISECONDS)
+          }
+        } catch (e: TimeoutException) {
+          throw IOException("timed out waiting for HTTP/3 response headers after ${readTimeoutMs}ms", e)
+        } catch (e: ExecutionException) {
+          val cause = e.cause ?: e
+          throw cause as? IOException ?: IOException(cause)
+        } catch (e: InterruptedException) {
+          Thread.currentThread().interrupt()
+          throw java.io.InterruptedIOException("interrupted waiting for HTTP/3 response headers")
+        }
       if (responseHeaders.status < 0) {
         throw java.io.IOException(
           "HTTP/3 peer sent a malformed :status pseudo-header (not parseable as a positive int)",

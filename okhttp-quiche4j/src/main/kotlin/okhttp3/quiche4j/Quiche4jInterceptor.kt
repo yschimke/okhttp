@@ -136,10 +136,18 @@ class Quiche4jInterceptor internal constructor(
 
     return try {
       innerChain.proceed(chain.request()).also { updateAltSvcFromResponse(it) }
-    } catch (e: java.io.IOException) {
+    } catch (e: Exception) {
       // Http3Preference.Force(fallback=true) — the caller asked for H/3 but also asked us to
-      // try the standard stack on failure. Every other path (Current / no tag) bubbles up.
-      if (preference is Http3Preference.Force && preference.fallback) {
+      // try the standard stack on failure. Intentionally broader than `IOException`: quiche's
+      // JNI layer can raise `RuntimeException` (LinkageError surfacing as such, stale native
+      // state, misbehaving interceptors); callers who wrote `fallback = true` asked us to
+      // recover from H/3 trouble regardless of the exact type. Errors (OOM, LinkageError)
+      // still bubble. If the call was canceled, skip the retry — the user asked to stop.
+      if (
+        preference is Http3Preference.Force &&
+        preference.fallback &&
+        !call.isCanceled()
+      ) {
         chain.proceed(outerRequest).also { updateAltSvcFromResponse(it) }
       } else {
         throw e

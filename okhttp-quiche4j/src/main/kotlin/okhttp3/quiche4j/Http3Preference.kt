@@ -12,7 +12,8 @@ package okhttp3.quiche4j
 import okhttp3.Request
 
 /**
- * Per-request override for [Quiche4jInterceptor]'s HTTP/3 routing decision. Attach via
+ * Per-request override for [Quiche4jInterceptor]'s HTTP/3 routing decision. Attach with
+ * OkHttp's generic Kotlin `tag<T>(tag)` extension, or from Java via
  * `Request.Builder.tag(Http3Preference::class.java, ...)`.
  *
  * The interceptor's default decision uses all the available signals (HTTPS DNS record, Alt-Svc
@@ -22,7 +23,7 @@ import okhttp3.Request
  * ```kotlin
  * val request = Request.Builder()
  *   .url("https://example.com/")
- *   .tag(Http3Preference::class.java, Http3Preference.Force())
+ *   .tag<Http3Preference>(Http3Preference.Force())
  *   .build()
  * ```
  */
@@ -63,7 +64,6 @@ sealed class Http3Preference {
 
   companion object {
     /** Retrieves any [Http3Preference] tag on [request], or [Current] if none is set. */
-    fun of(request: Request): Http3Preference =
-      request.tag(Http3Preference::class.java) ?: Current
+    fun of(request: Request): Http3Preference = request.tag<Http3Preference>() ?: Current
   }
 }

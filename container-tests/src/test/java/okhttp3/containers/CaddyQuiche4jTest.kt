@@ -117,7 +117,7 @@ class CaddyQuiche4jTest {
       Request
         .Builder()
         .url("https://localhost:$PORT/")
-        .tag(Http3Preference::class.java, Http3Preference.Force())
+        .tag<Http3Preference>(Http3Preference.Force())
         .build()
     client.newCall(request).execute().use { response ->
       assertThat(response.protocol).isEqualTo(Protocol.HTTP_3)
@@ -163,7 +163,7 @@ class CaddyQuiche4jTest {
               Request
                 .Builder()
                 .url("https://localhost:$PORT/")
-                .tag(Http3Preference::class.java, Http3Preference.Force())
+                .tag<Http3Preference>(Http3Preference.Force())
                 .build()
             client.newCall(req).execute().use { resp ->
               if (resp.protocol == Protocol.HTTP_3 && resp.code == 200) {

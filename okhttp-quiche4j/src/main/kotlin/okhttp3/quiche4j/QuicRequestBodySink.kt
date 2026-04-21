@@ -10,7 +10,6 @@
 package okhttp3.quiche4j
 
 import java.io.IOException
-import java.io.InterruptedIOException
 import okio.Buffer
 import okio.Sink
 import okio.Timeout
@@ -30,6 +29,12 @@ import okio.Timeout
 internal class QuicRequestBodySink(
   private val stream: QuicStream,
   private val pool: QuicPooledConnection,
+  /**
+   * Bound on each `sendBodyChunk` dispatch; `<= 0` means no bound. Matches the request's
+   * `writeTimeout` — a slow-consumer server that leaves us wedged in flow-control back-off
+   * can't hang the call thread forever.
+   */
+  private val writeTimeoutMillis: Long = 0L,
 ) : Sink {
   @Volatile private var closed: Boolean = false
 
@@ -49,23 +54,11 @@ internal class QuicRequestBodySink(
           } else {
             chunk.copyOfRange(offset, chunk.size)
           }
-        val n = pool.sendBodyChunk(stream, slice, fin = false)
-        // quiche returns DONE (-1) when the stream is flow-control-blocked. Back off and retry.
-        if (n <= 0) {
-          if (n < 0 && n != io.quiche4j.Quiche.ErrorCode.DONE.toLong()) {
-            throw IOException("quiche4j sendBody failed: $n")
-          }
-          try {
-            Thread.sleep(5)
-          } catch (e: InterruptedException) {
-            // Restore the interrupt flag + translate to an IOException so the caller's outer
-            // try/catch (and Quiche4jInterceptor's fallback path, if applicable) sees it
-            // cleanly instead of a checked exception bubbling out of an `okio.Sink.write`.
-            Thread.currentThread().interrupt()
-            throw InterruptedIOException("interrupted while waiting for QUIC flow-control window")
-          }
-          continue
-        }
+        // Flow-control back-off (quiche returning DONE) and write-timeout enforcement both
+        // live inside pool.sendBodyChunk: it re-queues on the I/O thread until the window
+        // opens, an error occurs, or the timeout elapses. So the call thread only sees a
+        // positive byte count or an IOException.
+        val n = pool.sendBodyChunk(stream, slice, fin = false, timeoutMillis = writeTimeoutMillis)
         offset += n.toInt()
       }
       remaining -= chunk.size
@@ -80,7 +73,7 @@ internal class QuicRequestBodySink(
     if (closed) return
     closed = true
     try {
-      pool.sendBodyChunk(stream, EMPTY_BYTES, fin = true)
+      pool.sendBodyChunk(stream, EMPTY_BYTES, fin = true, timeoutMillis = writeTimeoutMillis)
     } catch (_: IOException) {
       // Best effort — if the stream is already broken, cancelStream has (or will) clean up.
     }

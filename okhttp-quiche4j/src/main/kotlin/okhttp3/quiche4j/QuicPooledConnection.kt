@@ -17,15 +17,19 @@ import io.quiche4j.http3.Http3EventListener
 import io.quiche4j.http3.Http3Header
 import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLPeerUnverifiedException
@@ -59,6 +63,10 @@ internal class QuicPooledConnection private constructor(
 ) {
   private val streams = ConcurrentHashMap<Long, QuicStream>()
   private val taskQueue = LinkedBlockingQueue<Runnable>()
+
+  // Tasks that hit DONE (stream flow-control-blocked) and need another shot after the next
+  // receive+poll+send cycle. Only touched on the I/O thread — no sync needed.
+  private val retryQueue = ArrayDeque<Runnable>()
   // Dedicated send/receive buffers. Previously these were aliased onto one array, which meant
   // an outbound ACK could be clobbered by the next `socket.receive()` before it actually hit
   // the wire. Keep them separate.
@@ -88,18 +96,19 @@ internal class QuicPooledConnection private constructor(
    * and, if [body] is non-null, the body too. Returns the [QuicStream] the caller can wait on
    * for headers + body events.
    *
-   * The actual quiche calls run on the I/O thread.
+   * The actual quiche calls run on the I/O thread. [timeoutMillis] bounds the caller-side wait
+   * for the I/O thread to pick up the task; `<= 0` means no timeout. In practice the task is
+   * trivially short so the timeout is really a liveness check — if we exceed it, the I/O
+   * thread has wedged and the stream can't be opened.
    */
   fun openStream(
     headers: List<Http3Header>,
     body: ByteArray?,
     streamingBody: Boolean = false,
+    timeoutMillis: Long = 0L,
   ): QuicStream {
     activeCount.incrementAndGet()
-    val streamHolder = java.util.concurrent.atomic.AtomicReference<QuicStream>()
-    val errorHolder = java.util.concurrent.atomic.AtomicReference<Throwable>()
-    val latch = java.util.concurrent.CountDownLatch(1)
-
+    val future = CompletableFuture<QuicStream>()
     submit {
       try {
         val hasBody = body != null || streamingBody
@@ -107,25 +116,23 @@ internal class QuicPooledConnection private constructor(
         if (streamId < 0) throw IOException("quiche4j sendRequest failed: $streamId")
         val stream = QuicStream(streamId, this)
         streams[streamId] = stream
-        streamHolder.set(stream)
         if (body != null) {
           val n = h3.sendBody(streamId, body, true)
           if (n < 0 && n != Quiche.ErrorCode.DONE.toLong()) {
             throw IOException("quiche4j sendBody failed: $n")
           }
         }
+        future.complete(stream)
       } catch (t: Throwable) {
-        errorHolder.set(t)
-      } finally {
-        latch.countDown()
+        future.completeExceptionally(t)
       }
     }
-    latch.await()
-    errorHolder.get()?.let {
+    return try {
+      awaitFuture(future, timeoutMillis, "openStream")
+    } catch (e: IOException) {
       activeCount.decrementAndGet()
-      throw it as? IOException ?: IOException(it)
+      throw e
     }
-    return streamHolder.get() ?: throw IOException("openStream failed with no stream")
   }
 
   /**
@@ -139,32 +146,60 @@ internal class QuicPooledConnection private constructor(
 
   /**
    * Write a chunk of the request body on the I/O thread. Returns the number of bytes quiche
-   * accepted (may be less than [bytes].size if the stream is flow-control-blocked). Used by
-   * [QuicRequestBodySink] for duplex request bodies.
+   * accepted (may be less than [bytes].size). Used by [QuicRequestBodySink] for duplex request
+   * bodies.
+   *
+   * If quiche returns `DONE` (stream flow-control-blocked), the task re-queues itself on the
+   * I/O thread's retry list and is re-attempted after the next receive/poll/send cycle — so
+   * flow-control back-off happens on the I/O thread in lock-step with quiche's window updates,
+   * not as a timed busy-loop on the call thread. The caller's [timeoutMillis] bounds the total
+   * time spent waiting; `<= 0` means no timeout.
    */
   fun sendBodyChunk(
     stream: QuicStream,
     bytes: ByteArray,
     fin: Boolean,
+    timeoutMillis: Long = 0L,
   ): Long {
-    val holder = java.util.concurrent.atomic.AtomicReference<Any?>()
-    val latch = java.util.concurrent.CountDownLatch(1)
-    submit {
-      try {
-        val n = h3.sendBody(stream.streamId, bytes, fin)
-        holder.set(n)
-      } catch (t: Throwable) {
-        holder.set(t)
-      } finally {
-        latch.countDown()
+    val future = CompletableFuture<Long>()
+    val deadlineNs =
+      if (timeoutMillis > 0) {
+        System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+      } else {
+        Long.MAX_VALUE
       }
-    }
-    latch.await()
-    return when (val r = holder.get()) {
-      is Long -> r
-      is Throwable -> throw r as? IOException ?: IOException(r)
-      else -> throw IOException("sendBodyChunk: unexpected result $r")
-    }
+    lateinit var attempt: Runnable
+    attempt =
+      Runnable {
+        if (future.isDone) return@Runnable // caller already timed out / was cancelled
+        if (closed || conn.isClosed) {
+          future.completeExceptionally(IOException("connection closed"))
+          return@Runnable
+        }
+        try {
+          val n = h3.sendBody(stream.streamId, bytes, fin)
+          when {
+            n >= 0 -> future.complete(n)
+            n == Quiche.ErrorCode.DONE.toLong() -> {
+              // Stream flow-control-blocked. Defer until next I/O iteration so quiche has had a
+              // chance to receive + process MAX_STREAM_DATA frames. No Thread.sleep on any
+              // thread — the loop's socket.receive timeout bounds the re-try cadence.
+              if (System.nanoTime() > deadlineNs) {
+                future.completeExceptionally(
+                  IOException("sendBodyChunk timed out after ${timeoutMillis}ms (flow-control)"),
+                )
+              } else {
+                retryQueue += attempt
+              }
+            }
+            else -> future.completeExceptionally(IOException("quiche4j sendBody failed: $n"))
+          }
+        } catch (t: Throwable) {
+          future.completeExceptionally(t)
+        }
+      }
+    submit(attempt)
+    return awaitFuture(future, timeoutMillis, "sendBodyChunk")
   }
 
   /**
@@ -228,6 +263,25 @@ internal class QuicPooledConnection private constructor(
 
         // 4. Drain outbound packets.
         drainSend()
+
+        // 5. Re-attempt previously flow-control-blocked sends. Running these *after*
+        //    receive+poll+drainSend means quiche has just ingested any MAX_STREAM_DATA frames
+        //    the peer sent us; if the window opened, the retry succeeds this cycle. If it
+        //    didn't, the task re-enqueues itself and we try again next cycle (bounded by each
+        //    task's deadline, so no infinite spin).
+        if (retryQueue.isNotEmpty()) {
+          val batch = ArrayList<Runnable>(retryQueue)
+          retryQueue.clear()
+          for (task in batch) {
+            try {
+              task.run()
+            } catch (t: Throwable) {
+              failAllStreams(t)
+            }
+          }
+          // Any retry that ran send and produced outbound bytes needs drainSend to flush them.
+          drainSend()
+        }
       }
     } catch (t: Throwable) {
       failAllStreams(t)
@@ -316,6 +370,32 @@ internal class QuicPooledConnection private constructor(
     streams.values.forEach { it.deliverFailure(cause) }
     streams.clear()
   }
+
+  /**
+   * Await [future] with [timeoutMillis] and translate the three ways it can fail into
+   * `IOException`s the interceptor layer expects. `<= 0` means no timeout. Helper for the
+   * `submit { … future.complete(…) }` pattern used by [openStream] and [sendBodyChunk].
+   */
+  private fun <T> awaitFuture(
+    future: CompletableFuture<T>,
+    timeoutMillis: Long,
+    op: String,
+  ): T =
+    try {
+      if (timeoutMillis <= 0L) {
+        future.get()
+      } else {
+        future.get(timeoutMillis, TimeUnit.MILLISECONDS)
+      }
+    } catch (e: TimeoutException) {
+      throw IOException("$op timed out after ${timeoutMillis}ms", e)
+    } catch (e: ExecutionException) {
+      val cause = e.cause ?: e
+      throw cause as? IOException ?: IOException(cause)
+    } catch (e: InterruptedException) {
+      Thread.currentThread().interrupt()
+      throw InterruptedIOException("interrupted waiting for $op")
+    }
 
   fun close() {
     if (closed) return
