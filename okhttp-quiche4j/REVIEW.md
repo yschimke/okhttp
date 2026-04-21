@@ -27,78 +27,81 @@ bugs, tests we lack, or kdoc improvements.
 4. **FIXED — `QuicConnectionHandle.kt` — every call allocated a real
    `Socket()`** that never got closed, leaking an OS FD until GC. Replaced
    with a single static closed-socket singleton.
-5. **`QuicPooledConnection.kt:265-267` — `onHeaders` parses `:status` with
-   `v.toInt()` inside the listener on the I/O thread.** A malformed
-   `:status: abc` bubbles out as `NumberFormatException`, fails the whole
-   pooled connection, and fails every in-flight stream. Should use
-   `toIntOrNull()` and surface per-stream.
-6. **`Quiche4jCallServer.kt` — `stream.headersFuture.get()` has no
-   timeout.** A server that ACKs and then goes silent pins the call
-   forever (QUIC max-idle catches it eventually, but `readTimeout=0`
-   disables that). Wire `chain.readTimeoutMillis()` as a
-   `get(timeoutMillis, MS)`.
-7. **`Quiche4jInterceptor.kt` catch block only catches `IOException`.**
-   `chain.proceed`/`Quiche4jCallServer` can throw `RuntimeException` (bad
-   interceptor, classpath weirdness); `Force(fallback=true)` promises
-   fallback on H/3 failure but a non-IOException bypasses the catch. Pick
-   one: broaden the catch, or document fallback is IO-only.
-8. **`QuicPooledConnection.kt` — pool lock holds across the entire
-   handshake.** A call to a second origin waits for the first handshake
-   to complete. `ConcurrentHashMap.compute` per key would scope the wait.
+5. **FIXED — `QuicPooledConnection.kt` — `onHeaders` parses `:status`
+   with `v.toInt()` inside the listener on the I/O thread.** Now uses
+   `toIntOrNull()`; malformed `:status` surfaces per-stream via a
+   negative sentinel that `Quiche4jCallServer` turns into an
+   `IOException`.
+6. **FIXED — `Quiche4jCallServer.kt` — `stream.headersFuture.get()` has
+   no timeout.** Wired `chain.readTimeoutMillis()` through as
+   `get(timeoutMs, MILLISECONDS)`, with the OkHttp convention that
+   `readTimeout == 0` means "no bound" preserved.
+7. **FIXED — `Quiche4jInterceptor.kt` catch block only catches
+   `IOException`.** Broadened to `Exception` so `Force(fallback=true)`
+   catches quiche JNI `RuntimeException`s too. Cancelled calls still
+   skip the retry.
+8. **FIXED — `QuicPooledConnection.kt` — pool lock holds across the
+   entire handshake.** Replaced the process-wide `ReentrantLock` with
+   `ConcurrentHashMap.compute` per key. Distinct origins handshake in
+   parallel; same-origin races serialise and the second call reuses
+   the pooled connection the first produces.
 9. **`QuicPooledConnection.kt` — `cancelStream` doesn't remove the stream
-   from `streams` nor decrement `activeCount`.** Callers are expected to
-   follow cancel with `releaseStream`, but if the caller is blocked in
-   `headersFuture.get()` (bug #6) it never gets there. `isIdle` stays
-   false forever — not fatal today but blocks pool eviction later.
-10. **`QuicPooledConnection.kt` — `close()` doesn't join the I/O thread.**
-    Tests that create + close an engine in sequence can leak threads
-    between tests. Add `ioThread?.join(500)`.
+   from `streams` nor decrement `activeCount`.** Callers always pair
+   `cancelStream` with `releaseStream` today (even the cancellation
+   hook's failure path reaches it via `QuicBodySource.close`), so
+   this is latent rather than live — will matter when pool eviction
+   lands (M2-T3).
+10. **FIXED — `QuicPooledConnection.kt` — `close()` doesn't join the
+    I/O thread.** Now `ioThread?.join(500)` — above the 50ms socket
+    receive timeout so the loop has time to exit cleanly.
 
 ## Possible bugs / concurrency smells
 
-11. **`openStream` + `sendBodyChunk` use `CountDownLatch` with no
-    timeout.** If the I/O thread died for any reason, these call-thread
-    waits hang forever. Replace with `CompletableFuture.get(timeout, MS)`;
-    same pattern also shrinks the code.
-12. **`QuicRequestBodySink.kt` flow-control back-off is `Thread.sleep(5)`
-    + unbounded retry.** A slow server wedges the call thread with no
-    way to honour write timeouts. `InterruptedException` is undeclared
-    and bubbles as checked. Use a real condition tied to a write-timeout
-    budget.
+11. **FIXED — `openStream` + `sendBodyChunk` use `CountDownLatch` with
+    no timeout.** Both migrated to `CompletableFuture.get(timeout, MS)`
+    via a shared `awaitFuture` helper; openStream honours the chain's
+    `connectTimeoutMillis`, sendBodyChunk honours `writeTimeoutMillis`.
+12. **FIXED — `QuicRequestBodySink.kt` flow-control back-off is
+    `Thread.sleep(5)` + unbounded retry.** Retry moved off the call
+    thread entirely: `sendBodyChunk` re-queues itself on the I/O
+    thread's retry list when quiche returns `DONE`, bounded by the
+    caller's write-timeout deadline. Call thread only sees a positive
+    byte count or an `IOException`.
 13. **`QuicRequestBodySink.kt` — on duplex, `sendBodyChunk` blocks the
-    call thread via a latch.** For a gRPC-style duplex where the producer
-    writes-then-reads, fine. For a synchronous bulk writer expecting the
-    server to consume asynchronously, deadlock under flow control.
-    Document the limitation or tie the latch to a timeout.
-14. **`Quiche4jInterceptor.kt` — `chain as RealInterceptorChain`.** Hard
-    cast; callers wrapping the chain (rare but possible in tests) get
-    `ClassCastException`. Gate with `as? ... ?: return chain.proceed(req)`.
-15. **`HttpsAwareDns.kt` — `computeIfAbsent` caches nulls forever.** If
-    the first lookup fails, we remember "no record" for the whole process
-    lifetime. No TTL. Fine for long-running services, bad for long-lived
-    JVMs with transient DNS outages.
-16. **`HttpsAwareDns.kt` — `resolver.lookup` is called twice when there's
-    no h3 record.** Store the first list.
-17. **`HttpsAwareDns.kt` / `AndroidHttpsServiceRecordResolver.kt` —
-    `Executors.newCachedThreadPool` with no cap.** Under a burst of
-    distinct hosts, thousands of threads. Bound to ~4.
+    call thread via a latch.** Block is now via `CompletableFuture`
+    (bounded by write-timeout), not a latch. Document the synchronous-
+    writer deadlock risk in the sink kdoc.
+14. **FIXED — `Quiche4jInterceptor.kt` — `chain as
+    RealInterceptorChain`.** Now `chain as? RealInterceptorChain ?:
+    return chain.proceed(…)` — a test-wrapped chain falls through to
+    the standard transport instead of CCE-ing at the user's call site.
+15. **FIXED — `HttpsAwareDns.kt` — `computeIfAbsent` caches nulls
+    forever.** Added a 5-minute TTL (configurable via `cacheTtlMillis`)
+    on both hits and misses.
+16. **FIXED — `HttpsAwareDns.kt` — `resolver.lookup` called twice when
+    there's no h3 record.** Single resolver call now, filter in-memory.
+17. **FIXED — `HttpsAwareDns.kt` / `AndroidHttpsServiceRecordResolver.kt`
+    — `Executors.newCachedThreadPool` with no cap.** Default is a
+    shared `newFixedThreadPool(2)` daemon pool; constructor takes an
+    overridable `executor` param.
 18. **`QuicPooledConnection.kt` — `onData` drains into a single
     `ByteArrayOutputStream` and emits one `BodyEvent.Bytes`.** For a
     large body this doubles memory. Prefer streaming smaller chunks.
-19. **`QuicBodySource.kt` / `QuicRequestBodySink.kt` both return
-    `Timeout.NONE`.** OkHttpClient read/write timeouts on the buffered
-    source/sink are silently ignored. Propagate.
+19. **FIXED — `QuicBodySource.kt` / `QuicRequestBodySink.kt` both return
+    `Timeout.NONE`.** Both now expose a mutable `Timeout` seeded from
+    chain read/write timeouts, consulted on every read/write so
+    OkHttp `.readTimeout(…)` / `.writeTimeout(…)` behave as expected.
 20. **`QuicPooledConnection.kt` — I/O loop's outer `while` checks
     `conn.isClosed` each iteration, no happens-before with the native
     state.** Probably fine today but fragile if another thread ever
     calls `conn.close()`.
-21. **`AltSvcEntry.kt:159-165` — `splitAuthority` uses `lastIndexOf(':')`
-    which breaks for IPv6 `[2001:db8::1]:443`.** RFC 7838 allows those;
-    rare but not hypothetical.
-22. **`AltSvcEntry.kt:125-132` — `splitAtCommas` quote tracking: an
-    unbalanced quote flips `depth` and never flips back, swallowing the
-    rest of the header.** Browsers generally treat malformed Alt-Svc as
-    "ignore the whole header". Consider a fuzz test.
+21. **FIXED — `AltSvcEntry.kt` — `splitAuthority` uses `lastIndexOf(':')`
+    which breaks for IPv6 `[2001:db8::1]:443`.** Bracketed IPv6 parsed
+    properly; unbracketed (malformed) rejected.
+22. **FIXED — `AltSvcEntry.kt` — `splitAtCommas` quote tracking: an
+    unbalanced quote flipped a depth counter and never flipped back,
+    swallowing the rest of the header.** Toggle semantics now; a
+    malformed entry drops cleanly without eating the rest.
 
 ## Missing tests
 
