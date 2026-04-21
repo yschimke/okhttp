@@ -10,6 +10,8 @@
 package okhttp3.quiche4j
 
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.util.concurrent.TimeUnit
 import okhttp3.Call
 import okhttp3.EventListener
 import okio.Buffer
@@ -32,7 +34,15 @@ internal class QuicBodySource(
   private val eventListener: EventListener,
   private val call: Call,
   private val connectionHandle: QuicConnectionHandle,
+  readTimeoutMillis: Long = 0L,
 ) : Source {
+  // Initialised from the chain's readTimeout; callers can still mutate it via timeout()
+  // (e.g. okio's withTimeout(...) blocks) to narrow further on a per-read basis.
+  private val timeout =
+    Timeout().apply {
+      if (readTimeoutMillis > 0) timeout(readTimeoutMillis, TimeUnit.MILLISECONDS)
+    }
+
   @Volatile private var closed: Boolean = false
   private var startedReading: Boolean = false
   private var endedReading: Boolean = false
@@ -60,12 +70,15 @@ internal class QuicBodySource(
     if (currentChunk == null) {
       when (val event =
         try {
-          stream.bodyQueue.take()
+          awaitBodyEvent()
         } catch (ie: InterruptedException) {
           Thread.currentThread().interrupt()
           val ioe = IOException("interrupted while reading H/3 body")
           finishRead(ioe)
           throw ioe
+        } catch (te: InterruptedIOException) {
+          finishRead(te)
+          throw te
         }) {
         is BodyEvent.Bytes -> {
           currentChunk = event.data
@@ -105,7 +118,29 @@ internal class QuicBodySource(
     eventListener.connectionReleased(call, connectionHandle)
   }
 
-  override fun timeout(): Timeout = Timeout.NONE
+  override fun timeout(): Timeout = timeout
+
+  /**
+   * Block on [QuicStream.bodyQueue] but honour [timeout]: its configured `timeoutNanos`
+   * and its deadline (if set) both bound how long we'll wait. If neither is set we fall
+   * back to an uninterrupted `take()`, matching the pre-timeout behaviour.
+   *
+   * Throws [InterruptedIOException] on timeout; propagates [InterruptedException] verbatim
+   * so the caller can restore the interrupt flag in the outer catch.
+   */
+  private fun awaitBodyEvent(): BodyEvent {
+    val timeoutNs = timeout.timeoutNanos()
+    val hasDeadline = timeout.hasDeadline()
+    if (timeoutNs == 0L && !hasDeadline) {
+      return stream.bodyQueue.take()
+    }
+    val deadlineRemaining = if (hasDeadline) timeout.deadlineNanoTime() - System.nanoTime() else Long.MAX_VALUE
+    val timeoutRemaining = if (timeoutNs != 0L) timeoutNs else Long.MAX_VALUE
+    val waitNs = minOf(deadlineRemaining, timeoutRemaining)
+    if (waitNs <= 0) throw InterruptedIOException("read timeout")
+    return stream.bodyQueue.poll(waitNs, TimeUnit.NANOSECONDS)
+      ?: throw InterruptedIOException("read timeout after ${TimeUnit.NANOSECONDS.toMillis(waitNs)}ms")
+  }
 
   private fun finishRead(ioEx: IOException?) {
     if (endedReading) return

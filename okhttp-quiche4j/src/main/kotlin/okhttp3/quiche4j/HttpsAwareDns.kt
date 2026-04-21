@@ -12,6 +12,7 @@ package okhttp3.quiche4j
 import java.net.InetAddress
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import okhttp3.Dns
@@ -53,48 +54,85 @@ interface HttpsAware {
  *   .build()
  * ```
  *
+ * Entries are cached with a [cacheTtlMillis] budget (default 5 minutes) so a transient DNS
+ * outage doesn't poison the cache for the lifetime of the JVM. Successful results and null
+ * (no record) results share the same TTL — short enough that the cache tracks reality, long
+ * enough that a hot host doesn't spam the resolver.
+ *
  * @param delegate the underlying `Dns` used for A/AAAA resolution. Defaults to [Dns.SYSTEM].
  * @param resolver the HTTPS record resolver. Defaults to a dnsjava-backed implementation.
  * @param httpsLookupTimeoutMillis cap on how long we'll wait for the HTTPS record lookup to
  *   complete before proceeding with the A/AAAA result. The HTTPS result may still arrive later
  *   — it'll be cached for future calls to [getHttpsServiceRecord].
+ * @param cacheTtlMillis how long a lookup result stays in the cache before [lookup] re-issues
+ *   a fresh HTTPS query. Applies to both hits and misses.
+ * @param executor the executor that runs the HTTPS record lookups. Defaults to a small bounded
+ *   daemon pool shared across all `HttpsAwareDns` instances so a burst of distinct hosts
+ *   doesn't spawn an unbounded thread fleet.
  */
 class HttpsAwareDns(
   private val delegate: Dns = Dns.SYSTEM,
   private val resolver: HttpsServiceRecordResolver = HttpsServiceRecordResolver.DEFAULT,
   private val httpsLookupTimeoutMillis: Long = 500,
+  private val cacheTtlMillis: Long = TimeUnit.MINUTES.toMillis(5),
+  private val executor: Executor = DEFAULT_EXECUTOR,
 ) : Dns,
   HttpsAware {
-  private val executor =
-    Executors.newCachedThreadPool { r ->
-      Thread(r, "okhttp-quiche4j-https-dns").apply { isDaemon = true }
-    }
-  private val cache = ConcurrentHashMap<String, CompletableFuture<HttpsServiceRecord?>>()
+  private val cache = ConcurrentHashMap<String, Entry>()
 
   override fun lookup(hostname: String): List<InetAddress> {
-    // Kick off (or reuse) an HTTPS record lookup in parallel with the A/AAAA lookup.
-    cache.computeIfAbsent(hostname) {
+    // Kick off (or reuse, if still fresh) an HTTPS record lookup in parallel with A/AAAA.
+    cache.compute(hostname) { _, existing ->
+      if (existing != null && !existing.isExpired(cacheTtlMillis)) existing else startLookup(hostname)
+    }
+    return delegate.lookup(hostname)
+  }
+
+  override fun getHttpsServiceRecord(hostname: String): HttpsServiceRecord? {
+    val entry = cache[hostname] ?: return null
+    return try {
+      entry.future.get(httpsLookupTimeoutMillis, TimeUnit.MILLISECONDS)
+    } catch (_: Throwable) {
+      null
+    }
+  }
+
+  private fun startLookup(hostname: String): Entry {
+    val future =
       CompletableFuture.supplyAsync(
         {
           try {
-            resolver.lookup(hostname).sortedBy { it.priority }.firstOrNull { it.supportsHttp3 }
-              ?: resolver.lookup(hostname).minByOrNull { it.priority }
+            // Single resolver call — the previous impl looked up twice (once for h3, once for
+            // the "best priority" fallback) which burned an extra DNS round trip on every miss.
+            val records = resolver.lookup(hostname)
+            records.sortedBy { it.priority }.firstOrNull { it.supportsHttp3 }
+              ?: records.minByOrNull { it.priority }
           } catch (_: Throwable) {
             null
           }
         },
         executor,
       )
-    }
-    return delegate.lookup(hostname)
+    return Entry(future, System.nanoTime())
   }
 
-  override fun getHttpsServiceRecord(hostname: String): HttpsServiceRecord? {
-    val future = cache[hostname] ?: return null
-    return try {
-      future.get(httpsLookupTimeoutMillis, TimeUnit.MILLISECONDS)
-    } catch (_: Throwable) {
-      null
-    }
+  private data class Entry(
+    val future: CompletableFuture<HttpsServiceRecord?>,
+    val startedAtNs: Long,
+  ) {
+    fun isExpired(ttlMillis: Long): Boolean =
+      System.nanoTime() - startedAtNs > TimeUnit.MILLISECONDS.toNanos(ttlMillis)
+  }
+
+  companion object {
+    /**
+     * Shared default executor for HTTPS lookups. Bounded to 2 threads — HTTPS record queries
+     * are short (a handful of ms) and we want enough parallelism to cover a page load's worth
+     * of distinct origins without letting a pathological burst fan out unbounded.
+     */
+    private val DEFAULT_EXECUTOR: Executor =
+      Executors.newFixedThreadPool(2) { r ->
+        Thread(r, "okhttp-quiche4j-https-dns").apply { isDaemon = true }
+      }
   }
 }

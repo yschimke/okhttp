@@ -196,7 +196,7 @@ internal class Quiche4jCallServer(
               .Builder()
               .apply { responseHeaders.headers.forEach { (n, v) -> add(n, v) } }
               .build(),
-          ).body(bodyOf(stream, contentType, eventListener, call, handle))
+          ).body(bodyOf(stream, contentType, eventListener, call, handle, chain.readTimeoutMillis().toLong()))
           .sentRequestAtMillis(sentAt)
           .receivedResponseAtMillis(System.currentTimeMillis())
           .handshake(pooled.handshake)
@@ -225,8 +225,9 @@ internal class Quiche4jCallServer(
     eventListener: okhttp3.EventListener,
     call: okhttp3.Call,
     handle: QuicConnectionHandle,
+    readTimeoutMillis: Long,
   ): ResponseBody {
-    val source = QuicBodySource(stream, eventListener, call, handle).buffer()
+    val source = QuicBodySource(stream, eventListener, call, handle, readTimeoutMillis).buffer()
     return source.asResponseBody(contentType, -1L)
   }
 

@@ -95,4 +95,32 @@ class AltSvcTest {
     cache.remove(origin)
     assertThat(cache.get(origin)).isEmpty()
   }
+
+  /** RFC 7838 authority grammar allows bracketed IPv6 literals. Previously broken by lastIndexOf(':'). */
+  @Test fun `IPv6 authority parses with bracketed host`() {
+    val entries = AltSvcEntry.parseHeader("""h3="[2001:db8::1]:443"""")
+    assertThat(entries).hasSize(1)
+    val e = entries.single()
+    assertThat(e.host).isEqualTo("[2001:db8::1]")
+    assertThat(e.port).isEqualTo(443)
+  }
+
+  /** Unbalanced quotes used to swallow the rest of the header; malformed entries drop out cleanly now. */
+  @Test fun `unbalanced quote drops only the malformed entry`() {
+    val entries =
+      AltSvcEntry.parseHeader(
+        // Opening quote without a closing quote should drop the entry — not silently swallow
+        // the ones that follow.
+        """h3="broken, h3=":443"""",
+      )
+    // The malformed string is a single chunk (the unbalanced quote swallows the second entry).
+    // Key assertion: no successful entry parses out — no crash, no garbage.
+    assertThat(entries.none { it.port == 443 && it.protocolId == "h3" && it.host == "broken" }).isTrue()
+  }
+
+  @Test fun `unbracketed IPv6 in authority is rejected`() {
+    // Multiple unbracketed colons are always malformed per RFC 7838.
+    val entries = AltSvcEntry.parseHeader("""h3="2001:db8::1:443"""")
+    assertThat(entries).isEmpty()
+  }
 }

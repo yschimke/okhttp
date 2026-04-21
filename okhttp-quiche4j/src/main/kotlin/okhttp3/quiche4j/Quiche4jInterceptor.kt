@@ -64,7 +64,13 @@ class Quiche4jInterceptor internal constructor(
       return chain.proceed(outerRequest).also { updateAltSvcFromResponse(it) }
     }
 
-    val realChain = chain as RealInterceptorChain
+    // Soft-cast: a test-wrapped chain or some future wrapping interceptor might pass us a
+    // non-RealInterceptorChain. In that case we can't build the inner chain (nor pull dns
+    // off it), so fall through to the standard transport. Better than a CCE from the user's
+    // call site.
+    val realChain =
+      chain as? RealInterceptorChain
+        ?: return chain.proceed(outerRequest).also { updateAltSvcFromResponse(it) }
 
     // Discovery decision — HTTPS record (via HttpsAware Dns or explicit resolver) + Alt-Svc
     // cache + the request's Http3Preference tag. Shared with Quiche4jWebSocketFactory so the

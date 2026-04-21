@@ -14,10 +14,8 @@ import io.quiche4j.Quiche
 import io.quiche4j.http3.Http3
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.locks.ReentrantLock
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.X509TrustManager
-import kotlin.concurrent.withLock
 
 /**
  * Shared state for the HTTP/3 transport: quiche configuration defaults + the pool of per-origin
@@ -31,12 +29,16 @@ import kotlin.concurrent.withLock
  */
 internal class Quiche4jEngine {
   private val pool = ConcurrentHashMap<PoolKey, QuicPooledConnection>()
-  private val poolLock = ReentrantLock()
 
   /**
    * Returns a QUIC connection usable for [host]/[port]. Reuses a pooled connection if one is
    * alive; otherwise handshakes a new one and verifies the peer certificate chain against
    * [trustManager] + [hostnameVerifier] before publishing it to the pool.
+   *
+   * Concurrency: `ConcurrentHashMap.compute` provides per-key serialisation, so a handshake
+   * to origin B no longer waits for an in-flight handshake to origin A — only two concurrent
+   * requests *to the same origin* serialise on the first handshake, which is what we want
+   * (the second call reuses the resulting pooled connection).
    */
   fun acquire(
     host: String,
@@ -48,23 +50,20 @@ internal class Quiche4jEngine {
     maxIdleTimeoutMillis: Long,
   ): QuicPooledConnection {
     val key = PoolKey(host, port)
-    poolLock.withLock {
-      val existing = pool[key]
-      if (existing != null && !existing.closed) return existing
-      if (existing != null && existing.closed) pool.remove(key, existing)
-      val fresh =
-        QuicPooledConnection.connect(
-          key,
-          peer,
-          this,
-          trustManager,
-          hostnameVerifier,
-          handshakeTimeoutMillis,
-          maxIdleTimeoutMillis,
-        )
-      pool[key] = fresh
-      return fresh
-    }
+    return pool.compute(key) { _, existing ->
+      if (existing != null && !existing.closed) return@compute existing
+      // `existing.closed == true` is handled by returning a fresh connection below;
+      // compute's contract is that a non-null return replaces the mapping for this key.
+      QuicPooledConnection.connect(
+        key,
+        peer,
+        this,
+        trustManager,
+        hostnameVerifier,
+        handshakeTimeoutMillis,
+        maxIdleTimeoutMillis,
+      )
+    }!!
   }
 
   /** Returns the number of connections currently in the pool. Used by tests. */
@@ -75,10 +74,10 @@ internal class Quiche4jEngine {
    * this — idle connections are torn down by quiche's idle-timeout.
    */
   fun close() {
-    poolLock.withLock {
-      pool.values.forEach { it.close() }
-      pool.clear()
+    for (connection in pool.values) {
+      connection.close()
     }
+    pool.clear()
   }
 
   fun newConfig(maxIdleTimeoutMillis: Long): io.quiche4j.Config =

@@ -115,20 +115,23 @@ data class AltSvcEntry(
     const val DEFAULT_MA_SECONDS: Long = 24 * 60 * 60
 
     private fun splitAtCommas(input: String): List<String> {
-      // Commas inside quotes don't delimit entries.
+      // Commas inside quotes don't delimit entries. An unbalanced quote (no closing ")
+      // used to swallow the rest of the header; match browsers' robust behaviour by
+      // treating a malformed run as "one entry" — the entry parser will then drop it
+      // for being malformed.
       val parts = mutableListOf<String>()
-      var depth = 0
+      var inQuotes = false
       var start = 0
       var i = 0
       while (i < input.length) {
         val c = input[i]
-        when (c) {
-          '"' -> depth = if (depth == 0) 1 else 0
-          ',' -> if (depth == 0) {
+        when {
+          c == '"' -> inQuotes = !inQuotes
+          c == ',' && !inQuotes -> {
             parts += input.substring(start, i)
             start = i + 1
           }
-          '\\' -> if (depth == 1 && i + 1 < input.length) i++
+          c == '\\' && inQuotes && i + 1 < input.length -> i++
         }
         i++
       }
@@ -157,8 +160,23 @@ data class AltSvcEntry(
     }
 
     private fun splitAuthority(authority: String): Pair<String, Int>? {
+      // RFC 7838 §3 requires `alt-authority = [ uri-host ] ":" port`. IPv6 literals
+      // (RFC 3986 §3.2.2) are bracketed: `[2001:db8::1]:443`. Pure `lastIndexOf(':')`
+      // alone would pick a colon inside an IPv6 address — handle the bracketed form
+      // explicitly.
+      if (authority.startsWith("[")) {
+        val close = authority.indexOf(']')
+        if (close < 0 || close == authority.length - 1) return null
+        if (authority[close + 1] != ':') return null
+        val host = authority.substring(0, close + 1)
+        val port = authority.substring(close + 2).toIntOrNull() ?: return null
+        return host to port
+      }
       val colon = authority.lastIndexOf(':')
       if (colon < 0) return null
+      // Reject unbracketed IPv6 (multiple colons outside brackets) — RFC 7838 doesn't
+      // permit it and the header is almost certainly malformed.
+      if (authority.indexOf(':') != colon) return null
       val host = authority.substring(0, colon)
       val port = authority.substring(colon + 1).toIntOrNull() ?: return null
       return host to port

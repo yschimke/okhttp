@@ -406,6 +406,17 @@ internal class QuicPooledConnection private constructor(
     } catch (_: Throwable) {
       // best effort
     }
+    // Wait briefly for the I/O thread to exit — otherwise a test that creates + closes
+    // engines in sequence leaks threads between tests. 500ms is comfortably above the
+    // socket.receive timeout (50ms) that bounds the loop cycle.
+    val t = ioThread
+    if (t != null && t !== Thread.currentThread()) {
+      try {
+        t.join(500)
+      } catch (ie: InterruptedException) {
+        Thread.currentThread().interrupt()
+      }
+    }
   }
 
   private sealed class PendingEvent {
