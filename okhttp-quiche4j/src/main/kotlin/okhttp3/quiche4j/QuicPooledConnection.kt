@@ -305,7 +305,13 @@ internal class QuicPooledConnection private constructor(
 
   private fun pollAll() {
     while (true) {
-      val pending = java.util.concurrent.atomic.AtomicReference<PendingEvent>()
+      // Dispatch inside the callback. The callback runs on the I/O thread (this thread), so
+      // there's no race with the rest of pollAll/recv/send. Previously we staged events into
+      // an AtomicReference and dispatched after poll returned — harmless but added a per-
+      // event allocation and, worse, drained the whole body into one big array on each
+      // `onData` callback (doubling memory for multi-MB downloads). Now each recvBody chunk
+      // ships directly to the stream's bodyQueue as its own BodyEvent, so the consumer in
+      // QuicBodySource sees bounded-size deliveries.
       val pollResult =
         h3.poll(object : Http3EventListener {
           override fun onHeaders(
@@ -327,34 +333,26 @@ internal class QuicPooledConnection private constructor(
                 normal += n to v
               }
             }
-            pending.set(PendingEvent.Headers(sid, status, normal, hasBody))
+            streams[sid]?.deliverHeaders(status, normal)
           }
 
           override fun onData(sid: Long) {
-            // Drain as much as possible into a Bytes event. quiche doesn't tell us how many bytes
-            // are pending so we keep reading until recvBody returns DONE.
-            val out = java.io.ByteArrayOutputStream()
+            val stream = streams[sid] ?: return
+            // Stream each recvBody chunk as its own BodyEvent. recvBuf is reused each pass
+            // so copy out before the next recvBody call can overwrite it.
             while (true) {
               val n = h3.recvBody(sid, recvBuf)
               if (n <= 0) break
-              out.write(recvBuf, 0, n)
+              stream.deliverBody(recvBuf.copyOfRange(0, n))
             }
-            pending.set(PendingEvent.Body(sid, out.toByteArray()))
           }
 
           override fun onFinished(sid: Long) {
-            pending.set(PendingEvent.Finished(sid))
+            streams[sid]?.deliverEnd()
           }
         })
       if (pollResult == Quiche.ErrorCode.DONE.toLong()) break
       if (pollResult < 0) throw IOException("h3.poll failed: $pollResult")
-
-      when (val evt = pending.get()) {
-        is PendingEvent.Headers -> streams[evt.sid]?.deliverHeaders(evt.status, evt.headers)
-        is PendingEvent.Body -> if (evt.data.isNotEmpty()) streams[evt.sid]?.deliverBody(evt.data)
-        is PendingEvent.Finished -> streams[evt.sid]?.deliverEnd()
-        null -> { /* event with no listener payload */ }
-      }
     }
   }
 
@@ -419,25 +417,23 @@ internal class QuicPooledConnection private constructor(
     }
   }
 
-  private sealed class PendingEvent {
-    class Headers(
-      val sid: Long,
-      val status: Int,
-      val headers: List<Pair<String, String>>,
-      val hasBody: Boolean,
-    ) : PendingEvent()
-
-    class Body(
-      val sid: Long,
-      val data: ByteArray,
-    ) : PendingEvent()
-
-    class Finished(
-      val sid: Long,
-    ) : PendingEvent()
-  }
-
   companion object {
+    /**
+     * Test-only: returns a [QuicPooledConnection] instance whose constructor has been
+     * bypassed — every field is zero/null. Only the code paths that *don't* touch the
+     * native connection / socket / I/O thread are safe to exercise on the result. We use
+     * it to hand a [QuicStream] a non-null `connection` parameter in unit tests that
+     * never traverse `close()` / `sendBodyChunk()` / cancellation. Kept in main sources
+     * (rather than duplicated via reflection from test code) so the unsafe call is
+     * colocated with the class it instantiates.
+     */
+    internal fun newStubForTesting(): QuicPooledConnection {
+      val unsafeField = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe")
+      unsafeField.isAccessible = true
+      val unsafe = unsafeField.get(null) as sun.misc.Unsafe
+      return unsafe.allocateInstance(QuicPooledConnection::class.java) as QuicPooledConnection
+    }
+
     fun connect(
       key: PoolKey,
       peer: InetSocketAddress,
