@@ -30,25 +30,31 @@ import okhttp3.WebSocketListener
  * val ws = factory.newWebSocket(request, listener)
  * ```
  *
+ * The factory consults the same HTTP/3 discovery signals as [Quiche4jInterceptor]:
+ *
+ *  * [Http3Preference] tag on the request — [Http3Preference.Force] bypasses discovery,
+ *    [Http3Preference.ForceOff] skips H/3 entirely.
+ *  * HTTPS DNS record (RFC 9460), either via the [OkHttpClient]'s [okhttp3.Dns]
+ *    implementing [HttpsAware] or an explicit [HttpsServiceRecordResolver].
+ *  * Alt-Svc cache seeded by prior interceptor responses.
+ *
+ * When the signals say "h3 not advertised here", the factory skips the handshake and
+ * fires [WebSocketListener.onFailure] with [NoHttp3Route]. That is exactly the shape
+ * [FailoverWebSocketFactory] needs to transparently hand off to its secondary.
+ *
  * [newWebSocket] is **non-blocking**, matching [OkHttpClient.newWebSocket]. The returned
  * [WebSocket] starts in a "connecting" state: the extended-CONNECT handshake runs on the
- * supplied connect executor (defaulting to the client's Dispatcher executor), and messages
- * sent via [WebSocket.send] before the handshake completes are queued. On success,
- * [WebSocketListener.onOpen] fires and queued messages are drained. On failure,
+ * supplied connect executor (defaulting to the client's Dispatcher executor), and
+ * messages sent before the handshake completes are queued. On success,
+ * [WebSocketListener.onOpen] fires and queued messages drain. On failure,
  * [WebSocketListener.onFailure] fires and no further callbacks run.
- *
- * Typical wiring without failover:
- *
- * ```kotlin
- * val client = OkHttpClient.Builder().build()
- * val factory = Quiche4jWebSocketFactory.Builder().client(client).build()
- * val ws = factory.newWebSocket(request, listener)
- * ```
  */
 class Quiche4jWebSocketFactory internal constructor(
   internal val engine: Quiche4jEngine,
   internal val client: OkHttpClient,
   internal val connectExecutor: Executor,
+  internal val httpsRecordResolver: HttpsServiceRecordResolver?,
+  internal val altSvcCache: AltSvcCache,
 ) : WebSocket.Factory {
   override fun newWebSocket(
     request: Request,
@@ -61,7 +67,16 @@ class Quiche4jWebSocketFactory internal constructor(
     require(scheme == "wss" || scheme == "https") {
       "Quiche4jWebSocketFactory requires wss:// or https://, got $scheme"
     }
-    val proxy = ConnectingQuiche4jWebSocket(engine, client, request, listener)
+
+    val proxy =
+      ConnectingQuiche4jWebSocket(
+        engine = engine,
+        client = client,
+        httpsRecordResolver = httpsRecordResolver,
+        altSvcCache = altSvcCache,
+        request = request,
+        userListener = listener,
+      )
     connectExecutor.execute { proxy.doConnect() }
     return proxy
   }
@@ -69,6 +84,8 @@ class Quiche4jWebSocketFactory internal constructor(
   class Builder {
     private var client: OkHttpClient? = null
     private var connectExecutor: Executor? = null
+    private var httpsRecordResolver: HttpsServiceRecordResolver? = null
+    private var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
 
     /**
      * The [OkHttpClient] whose TLS trust, hostname verifier, DNS, and timeouts configure
@@ -82,6 +99,23 @@ class Quiche4jWebSocketFactory internal constructor(
      */
     fun connectExecutor(executor: Executor) = apply { this.connectExecutor = executor }
 
+    /**
+     * Optional HTTPS DNS record (RFC 9460) resolver. If set, the factory consults it to
+     * confirm the origin advertises `"h3"` before attempting the handshake. Leaving this
+     * null (the default) is fine when the [OkHttpClient]'s [okhttp3.Dns] implements
+     * [HttpsAware], or when you pair this factory with [FailoverWebSocketFactory] and
+     * don't mind a speculative attempt.
+     */
+    fun httpsServiceRecordResolver(resolver: HttpsServiceRecordResolver?) =
+      apply { this.httpsRecordResolver = resolver }
+
+    /**
+     * Alt-Svc cache consulted before attempting the H/3 handshake and (ideally) shared
+     * with a [Quiche4jInterceptor] on the same [OkHttpClient] so both surfaces see the
+     * same advertised alternatives. Defaults to [InMemoryAltSvcCache].
+     */
+    fun altSvcCache(cache: AltSvcCache) = apply { this.altSvcCache = cache }
+
     fun build(): Quiche4jWebSocketFactory {
       val c = client ?: OkHttpClient.Builder().build()
       val e: Executor = connectExecutor ?: c.dispatcher.executorService
@@ -89,6 +123,8 @@ class Quiche4jWebSocketFactory internal constructor(
         engine = Quiche4jEngine(),
         client = c,
         connectExecutor = e,
+        httpsRecordResolver = httpsRecordResolver,
+        altSvcCache = altSvcCache,
       )
     }
   }

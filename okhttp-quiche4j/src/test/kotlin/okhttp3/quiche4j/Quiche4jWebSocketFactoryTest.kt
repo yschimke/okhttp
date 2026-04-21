@@ -64,6 +64,103 @@ class Quiche4jWebSocketFactoryTest {
     assertThat(ws.queueSize()).isEqualTo(2L) // approx — matches RealWebSocket's measure
   }
 
+  @Test fun `Http3Preference ForceOff produces NoHttp3Route before touching the engine`() {
+    val inline = Executor { it.run() }
+    val factory =
+      Quiche4jWebSocketFactory
+        .Builder()
+        .client(OkHttpClient())
+        .connectExecutor(inline)
+        .build()
+    val listener = RecordingListener()
+    val request =
+      Request
+        .Builder()
+        .url("https://10.255.255.1:1/chat")
+        .tag<Http3Preference>(Http3Preference.ForceOff)
+        .build()
+    factory.newWebSocket(request, listener)
+    assertThat(listener.failureCount.get()).isEqualTo(1)
+    assertThat(listener.lastFailure.get()).isNotNull()
+    // Must be the specific "don't bother retrying" subtype so FailoverWebSocketFactory can
+    // distinguish it from a real handshake failure if they're composed.
+    val cause = listener.lastFailure.get()!!
+    check(cause is NoHttp3Route) { "expected NoHttp3Route, got ${cause.javaClass.name}: $cause" }
+  }
+
+  @Test fun `discovery without h3 advertisement surfaces NoHttp3Route`() {
+    val inline = Executor { it.run() }
+    // An explicit HTTPS resolver that returns "no h3" is the cheap way to exercise the
+    // discovery-respecting branch without needing real DNS.
+    val resolverWithoutH3 =
+      object : HttpsServiceRecordResolver {
+        override fun lookup(hostname: String): List<HttpsServiceRecord> =
+          listOf(
+            HttpsServiceRecord(
+              priority = 1,
+              targetName = "",
+              port = null,
+              alpnIds = listOf("h2"),
+              ipAddressHints = emptyList(),
+              echConfigList = null,
+            ),
+          )
+      }
+    val factory =
+      Quiche4jWebSocketFactory
+        .Builder()
+        .client(OkHttpClient())
+        .connectExecutor(inline)
+        .httpsServiceRecordResolver(resolverWithoutH3)
+        .build()
+    val listener = RecordingListener()
+    val request = Request.Builder().url("https://10.255.255.1:1/chat").build()
+    factory.newWebSocket(request, listener)
+    assertThat(listener.failureCount.get()).isEqualTo(1)
+    val cause = listener.lastFailure.get()!!
+    check(cause is NoHttp3Route) { "expected NoHttp3Route, got ${cause.javaClass.name}: $cause" }
+  }
+
+  @Test fun `Force bypasses HTTPS-record discovery that would otherwise say no`() {
+    val inline = Executor { it.run() }
+    val resolverWithoutH3 =
+      object : HttpsServiceRecordResolver {
+        override fun lookup(hostname: String): List<HttpsServiceRecord> =
+          listOf(
+            HttpsServiceRecord(
+              priority = 1,
+              targetName = "",
+              port = null,
+              alpnIds = listOf("h2"),
+              ipAddressHints = emptyList(),
+              echConfigList = null,
+            ),
+          )
+      }
+    val factory =
+      Quiche4jWebSocketFactory
+        .Builder()
+        .client(OkHttpClient())
+        .connectExecutor(inline)
+        .httpsServiceRecordResolver(resolverWithoutH3)
+        .build()
+    val listener = RecordingListener()
+    // Force means "try anyway". The handshake will still fail (no real server), so we get
+    // a failure — but not NoHttp3Route. That proves discovery was bypassed.
+    val request =
+      Request
+        .Builder()
+        .url("https://10.255.255.1:1/chat")
+        .tag<Http3Preference>(Http3Preference.Force())
+        .build()
+    factory.newWebSocket(request, listener)
+    assertThat(listener.failureCount.get()).isEqualTo(1)
+    val cause = listener.lastFailure.get()!!
+    check(cause !is NoHttp3Route) {
+      "Force should bypass discovery, but got NoHttp3Route: $cause"
+    }
+  }
+
   @Test fun `connect failure fires onFailure without onOpen`() {
     // A URL that won't resolve so acquire() throws fast. Run the handshake on the calling
     // thread via an inline executor so the failure is observable synchronously.
@@ -236,6 +333,7 @@ class Quiche4jWebSocketFactoryTest {
   private class RecordingListener : WebSocketListener() {
     val openedCount = java.util.concurrent.atomic.AtomicInteger()
     val failureCount = java.util.concurrent.atomic.AtomicInteger()
+    val lastFailure = AtomicReference<Throwable?>()
 
     override fun onOpen(
       webSocket: WebSocket,
@@ -250,6 +348,7 @@ class Quiche4jWebSocketFactoryTest {
       response: Response?,
     ) {
       failureCount.incrementAndGet()
+      lastFailure.set(t)
     }
   }
 

@@ -66,49 +66,16 @@ class Quiche4jInterceptor internal constructor(
 
     val realChain = chain as RealInterceptorChain
 
-    // Optional HTTPS-record check. Two sources, in priority order:
-    //   1. The OkHttpClient's Dns, if it implements HttpsAware. Preferred because the lookup has
-    //      already happened as part of the regular A/AAAA query.
-    //   2. The explicit resolver passed on the Builder. Used by callers who don't want to swap
-    //      their Dns wholesale.
-    val hostname = outerRequest.url.host
-    val dns = realChain.dns
-    val discoveryEnabled = dns is HttpsAware || httpsRecordResolver != null
-    val record: HttpsServiceRecord? =
-      when {
-        dns is HttpsAware -> {
-          try {
-            dns.lookup(hostname)
-          } catch (_: Throwable) {
-            // DNS failure — best-effort. chain.proceed() will re-attempt and surface the error.
-          }
-          dns.getHttpsServiceRecord(hostname)
-        }
-        httpsRecordResolver != null ->
-          try {
-            httpsRecordResolver.lookup(hostname).firstOrNull()
-          } catch (_: Throwable) {
-            null
-          }
-        else -> null
-      }
-
-    // Decision: prefer HTTP/3 when any of the following is true:
-    //   (a) the request carries Http3Preference.Force — bypass all discovery
-    //   (b) discovery is disabled (no HTTPS-record resolver, no HttpsAware Dns, no cached
-    //       Alt-Svc) — the caller asked for HTTP/3 by adding this interceptor
-    //   (c) HTTPS record explicitly advertises h3
-    //   (d) Alt-Svc cache has an unexpired h3 entry for this origin
-    val origin = AltSvcOrigin.of(outerRequest.url)
-    val altSvcHasH3 = altSvcCache.get(origin).any { it.protocolId.equals("h3", true) }
+    // Discovery decision — HTTPS record (via HttpsAware Dns or explicit resolver) + Alt-Svc
+    // cache + the request's Http3Preference tag. Shared with Quiche4jWebSocketFactory so the
+    // WebSocket surface honours the same signals.
     val shouldHandle =
-      when {
-        preference is Http3Preference.Force -> true
-        !discoveryEnabled -> true
-        record?.supportsHttp3 == true -> true
-        altSvcHasH3 -> true
-        else -> false
-      }
+      Http3Decision.shouldAttempt(
+        request = outerRequest,
+        dns = realChain.dns,
+        httpsResolver = httpsRecordResolver,
+        altSvcCache = altSvcCache,
+      )
     if (!shouldHandle) {
       // Fall through but still scan the response's Alt-Svc header so the *next* call can prefer
       // HTTP/3 if the origin starts advertising it.

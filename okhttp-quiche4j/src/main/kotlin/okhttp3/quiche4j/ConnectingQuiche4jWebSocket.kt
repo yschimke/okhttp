@@ -30,6 +30,8 @@ import okio.ByteString
 internal class ConnectingQuiche4jWebSocket(
   private val engine: Quiche4jEngine,
   private val client: OkHttpClient,
+  private val httpsRecordResolver: HttpsServiceRecordResolver?,
+  private val altSvcCache: AltSvcCache,
   private val request: Request,
   private val userListener: WebSocketListener,
 ) : WebSocket {
@@ -97,6 +99,30 @@ internal class ConnectingQuiche4jWebSocket(
     }
 
   internal fun doConnect() {
+    // Short-circuit the cases where H/3 isn't viable before touching the engine:
+    //   * ForceOff → user explicitly opted out of H/3.
+    //   * Discovery configured AND neither HTTPS record nor Alt-Svc advertises h3 AND no
+    //     Force tag on the request → origin hasn't told us it speaks h3, so trying would
+    //     waste a round-trip.
+    // Both surface as NoHttp3Route — a subtype of IOException that FailoverWebSocketFactory
+    // treats as "skip primary, go straight to secondary".
+    val preference = Http3Preference.of(request)
+    if (preference is Http3Preference.ForceOff) {
+      reportFailure(NoHttp3Route("Http3Preference.ForceOff on this request"))
+      return
+    }
+    val viable =
+      Http3Decision.shouldAttempt(
+        request = request,
+        dns = client.dns,
+        httpsResolver = httpsRecordResolver,
+        altSvcCache = altSvcCache,
+      )
+    if (!viable) {
+      reportFailure(NoHttp3Route("origin does not advertise h3 via Alt-Svc or HTTPS record"))
+      return
+    }
+
     try {
       val ws = Quiche4jWebSocket.connect(engine, client, request, proxiedListener)
       val drainSnapshot: List<Pending>
@@ -129,17 +155,21 @@ internal class ConnectingQuiche4jWebSocket(
       // on and the user can still send more messages against `delegate`.
     } catch (e: Exception) {
       val ioe = e as? IOException ?: IOException(e)
-      synchronized(lock) {
-        closed = true
-        failure = ioe
-        pending.clear()
-        pendingBytes = 0
-      }
-      try {
-        userListener.onFailure(this, ioe, null)
-      } catch (_: Throwable) {
-        // Listener exceptions shouldn't break teardown.
-      }
+      reportFailure(ioe)
+    }
+  }
+
+  private fun reportFailure(cause: IOException) {
+    synchronized(lock) {
+      closed = true
+      failure = cause
+      pending.clear()
+      pendingBytes = 0
+    }
+    try {
+      userListener.onFailure(this, cause, null)
+    } catch (_: Throwable) {
+      // Listener exceptions shouldn't break teardown.
     }
   }
 
