@@ -218,6 +218,24 @@ open class OkHttpClient internal constructor(
   @get:JvmName("protocols")
   val protocols: List<Protocol> = builder.protocols
 
+  /**
+   * Cache of `Alt-Svc` advertisements (RFC 7838). Populated as responses arrive and
+   * consulted by the route planner to prefer HTTP/3 on later requests to the same origin.
+   * Defaults to a fresh in-memory cache per client; replace with a persistent
+   * implementation to carry entries across process restarts.
+   */
+  @get:JvmName("altSvcCache")
+  val altSvcCache: AltSvcCache = builder.altSvcCache
+
+  /**
+   * Optional resolver for DNS HTTPS records (RFC 9460). When non-null the route planner
+   * consults it to decide whether an origin advertises HTTP/3 before attempting the
+   * handshake. No default is provided — the on-the-wire HTTPS/SVCB parser lives in
+   * optional dependencies.
+   */
+  @get:JvmName("httpsServiceRecordResolver")
+  val httpsServiceRecordResolver: HttpsServiceRecordResolver? = builder.httpsServiceRecordResolver
+
   @get:JvmName("hostnameVerifier")
   val hostnameVerifier: HostnameVerifier = builder.hostnameVerifier
 
@@ -606,6 +624,8 @@ open class OkHttpClient internal constructor(
     internal var x509TrustManagerOrNull: X509TrustManager? = null
     internal var connectionSpecs: List<ConnectionSpec> = DEFAULT_CONNECTION_SPECS
     internal var protocols: List<Protocol> = DEFAULT_PROTOCOLS
+    internal var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
+    internal var httpsServiceRecordResolver: HttpsServiceRecordResolver? = null
     internal var hostnameVerifier: HostnameVerifier = OkHostnameVerifier
     internal var certificatePinner: CertificatePinner = CertificatePinner.DEFAULT
     internal var certificateChainCleaner: CertificateChainCleaner? = null
@@ -641,6 +661,8 @@ open class OkHttpClient internal constructor(
       this.x509TrustManagerOrNull = okHttpClient.x509TrustManager
       this.connectionSpecs = okHttpClient.connectionSpecs
       this.protocols = okHttpClient.protocols
+      this.altSvcCache = okHttpClient.altSvcCache
+      this.httpsServiceRecordResolver = okHttpClient.httpsServiceRecordResolver
       this.hostnameVerifier = okHttpClient.hostnameVerifier
       this.certificatePinner = okHttpClient.certificatePinner
       this.certificateChainCleaner = okHttpClient.certificateChainCleaner
@@ -1047,6 +1069,29 @@ open class OkHttpClient internal constructor(
 
         // Assign as an unmodifiable list. This is effectively immutable.
         this.protocols = protocolsCopy.unmodifiable()
+      }
+
+    /**
+     * Sets the `Alt-Svc` (RFC 7838) cache consulted by the route planner to prefer
+     * HTTP/3 for origins that previously advertised it. Defaults to a fresh
+     * [InMemoryAltSvcCache]. Replace with a persistent implementation to carry
+     * advertisements across process restarts.
+     */
+    fun altSvcCache(altSvcCache: AltSvcCache) =
+      apply {
+        this.altSvcCache = altSvcCache
+      }
+
+    /**
+     * Sets the resolver for DNS HTTPS records (RFC 9460). When non-null the route planner
+     * consults it to decide whether an origin advertises HTTP/3 before attempting the
+     * handshake. OkHttp does not ship a default — the on-the-wire parser lives in
+     * optional dependencies (e.g. dnsjava on the JVM, `android.net.DnsResolver` on
+     * Android 29+).
+     */
+    fun httpsServiceRecordResolver(httpsServiceRecordResolver: HttpsServiceRecordResolver?) =
+      apply {
+        this.httpsServiceRecordResolver = httpsServiceRecordResolver
       }
 
     /**
