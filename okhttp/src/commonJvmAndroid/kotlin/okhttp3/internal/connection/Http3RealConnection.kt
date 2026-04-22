@@ -82,11 +82,13 @@ internal class Http3RealConnection(
   /**
    * [Connection.socket] returns a [java.net.Socket] — an interface we can't cleanly
    * satisfy for a UDP-based transport. Stage-3 will broaden the return type to
-   * `okio.Socket` or introduce a transport-aware sibling. Until then we hand back an
-   * unbound socket whose `close()` is harmless, used only by [RealConnectionPool] for
-   * eviction bookkeeping.
+   * `okio.Socket` or introduce a transport-aware sibling. Until then we hand back a
+   * pre-closed socket: the pool only calls `closeQuietly()` on it during eviction, and
+   * a closed socket short-circuits that to a no-op — no stray file descriptors, no
+   * pretending we own TCP state we don't. Anything else attempted on it (I/O, binding,
+   * querying) will fail fast with a clear `SocketException`.
    */
-  override fun socket(): JavaNetSocket = PLACEHOLDER_SOCKET
+  override fun socket(): JavaNetSocket = PLACEHOLDER_CLOSED_SOCKET
 
   /**
    * Returns an [ExchangeCodec] that encodes one HTTP request/response exchange over this
@@ -161,6 +163,7 @@ internal class Http3RealConnection(
 
   companion object {
     /** See [socket]. */
-    private val PLACEHOLDER_SOCKET = JavaNetSocket()
+    private val PLACEHOLDER_CLOSED_SOCKET: JavaNetSocket =
+      JavaNetSocket().apply { close() }
   }
 }
