@@ -92,24 +92,45 @@ class RealRoutePlanner internal constructor(
     // latency optimisation; the postponement-based fallback is the correctness
     // backstop.
     val engine = call.client.http3Engine
-    if (engine != null &&
-      !routeDatabase.shouldPostpone(connect.route) &&
-      Http3Decision.shouldAttempt(call.client, call.originalRequest, address)
-    ) {
-      val h3Plan =
-        Http3ConnectPlan(
-          taskRunner = taskRunner,
-          connectionPool = connectionPool,
-          engine = engine,
-          call = call,
-          route = connect.route,
-          connectionListener = connectionPool.connectionListener,
-        )
-      deferredPlans.addLast(connect)
-      return h3Plan
+    if (engine != null && !routeDatabase.shouldPostpone(connect.route)) {
+      val decision = Http3Decision.decide(call.client, call.originalRequest, address)
+      if (decision is Http3Decision.Decision.Attempt) {
+        val h3Route = applyPortOverride(connect.route, decision.portOverride)
+        val h3Plan =
+          Http3ConnectPlan(
+            taskRunner = taskRunner,
+            connectionPool = connectionPool,
+            engine = engine,
+            call = call,
+            route = h3Route,
+            connectionListener = connectionPool.connectionListener,
+          )
+        deferredPlans.addLast(connect)
+        return h3Plan
+      }
     }
 
     return connect
+  }
+
+  /**
+   * Rewrite [route]'s UDP peer port if discovery pointed at a non-default port.
+   * Keeps the original address + proxy + IP, swapping only the port portion of the
+   * socket address. Returns the input unchanged when [portOverride] is null or equal
+   * to the existing port.
+   */
+  private fun applyPortOverride(
+    route: Route,
+    portOverride: Int?,
+  ): Route {
+    if (portOverride == null || portOverride == route.socketAddress.port) return route
+    val currentAddress = route.socketAddress.address
+      ?: return route // Unresolved hostname — let the engine handle it as-is.
+    return Route(
+      address = route.address,
+      proxy = route.proxy,
+      socketAddress = java.net.InetSocketAddress(currentAddress, portOverride),
+    )
   }
 
   /**

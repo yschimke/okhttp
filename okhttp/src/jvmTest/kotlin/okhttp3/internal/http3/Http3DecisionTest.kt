@@ -16,7 +16,9 @@
 package okhttp3.internal.http3
 
 import assertk.assertThat
+import assertk.assertions.isEqualTo
 import assertk.assertions.isFalse
+import assertk.assertions.isNull
 import assertk.assertions.isTrue
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -153,6 +155,97 @@ class Http3DecisionTest {
     )
     val client = OkHttpClient.Builder().http3Engine(NoopEngine).altSvcCache(cache).build()
     assertThat(Http3Decision.shouldAttempt(client, request, address)).isFalse()
+  }
+
+  @Test fun `Alt-Svc entry with non-default port surfaces as port override`() {
+    val cache = okhttp3.InMemoryAltSvcCache()
+    cache.put(
+      origin = AltSvcOrigin("http", "example.com", 443),
+      entries =
+        listOf(
+          AltSvcEntry(
+            protocolId = "h3",
+            host = "",
+            port = 8443, // non-default
+            expiresAtMillis = System.currentTimeMillis() + 60_000,
+          ),
+        ),
+    )
+    val client = OkHttpClient.Builder().http3Engine(NoopEngine).altSvcCache(cache).build()
+    val decision = Http3Decision.decide(client, request, address)
+    check(decision is Http3Decision.Decision.Attempt)
+    assertThat(decision.portOverride).isEqualTo(8443)
+  }
+
+  @Test fun `Alt-Svc entry with same port as origin has no port override`() {
+    val cache = okhttp3.InMemoryAltSvcCache()
+    cache.put(
+      origin = AltSvcOrigin("http", "example.com", 443),
+      entries =
+        listOf(
+          AltSvcEntry(
+            protocolId = "h3",
+            host = "",
+            port = 443,
+            expiresAtMillis = System.currentTimeMillis() + 60_000,
+          ),
+        ),
+    )
+    val client = OkHttpClient.Builder().http3Engine(NoopEngine).altSvcCache(cache).build()
+    val decision = Http3Decision.decide(client, request, address)
+    check(decision is Http3Decision.Decision.Attempt)
+    assertThat(decision.portOverride).isNull()
+  }
+
+  @Test fun `HTTPS record port override propagates`() {
+    val resolver =
+      HttpsServiceRecordResolver {
+        listOf(
+          HttpsServiceRecord(
+            priority = 1,
+            targetName = "example.com",
+            port = 8443,
+            alpnIds = listOf("h3", "h2"),
+            ipAddressHints = emptyList(),
+            echConfigList = null,
+          ),
+        )
+      }
+    val client =
+      OkHttpClient
+        .Builder()
+        .http3Engine(NoopEngine)
+        .httpsServiceRecordResolver(resolver)
+        .build()
+    val decision = Http3Decision.decide(client, request, address)
+    check(decision is Http3Decision.Decision.Attempt)
+    assertThat(decision.portOverride).isEqualTo(8443)
+  }
+
+  @Test fun `Force tag portOverride wins over every other signal`() {
+    val cache = okhttp3.InMemoryAltSvcCache()
+    cache.put(
+      origin = AltSvcOrigin("http", "example.com", 443),
+      entries =
+        listOf(
+          AltSvcEntry(
+            protocolId = "h3",
+            host = "",
+            port = 8443,
+            expiresAtMillis = System.currentTimeMillis() + 60_000,
+          ),
+        ),
+    )
+    val client = OkHttpClient.Builder().http3Engine(NoopEngine).altSvcCache(cache).build()
+    val forced =
+      Request
+        .Builder()
+        .url("https://example.com/")
+        .tag<Http3Preference>(Http3Preference.Force(portOverride = 9443))
+        .build()
+    val decision = Http3Decision.decide(client, forced, address)
+    check(decision is Http3Decision.Decision.Attempt)
+    assertThat(decision.portOverride).isEqualTo(9443)
   }
 
   // --- helpers --------------------------------------------------------------
