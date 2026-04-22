@@ -74,7 +74,7 @@ class RealConnection internal constructor(
   private val protocol: Protocol,
   private val socket: BufferedSocket,
   private val pingIntervalMillis: Int,
-  internal val connectionListener: ConnectionListener,
+  override val connectionListener: ConnectionListener,
 ) : Http2Connection.Listener(),
   PooledConnection {
   private var http2Connection: Http2Connection? = null
@@ -135,13 +135,13 @@ class RealConnection internal constructor(
   }
 
   /** Prevent this connection from being used for hosts other than the one in [route]. */
-  internal fun noCoalescedConnections() {
+  override fun noCoalescedConnections() {
     withLock {
       noCoalescedConnections = true
     }
   }
 
-  internal fun incrementSuccessCount() {
+  override fun incrementSuccessCount() {
     withLock {
       successCount++
     }

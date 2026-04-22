@@ -19,6 +19,7 @@ import okhttp3.Cache
 import okhttp3.Dispatcher
 import okhttp3.Response
 import okhttp3.internal.connection.Exchange
+import okhttp3.internal.connection.PooledConnection
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.connection.RealConnection
 import okio.FileSystem
@@ -39,7 +40,7 @@ internal var RealConnection.idleAtNsAccessor: Long
 internal val Response.exchangeAccessor: Exchange?
   get() = this.exchange
 
-internal val Exchange.connectionAccessor: RealConnection
+internal val Exchange.connectionAccessor: PooledConnection
   get() = this.connection
 
 internal fun Dispatcher.finishedAccessor(call: RealCall.AsyncCall) = this.finished(call)

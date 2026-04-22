@@ -499,7 +499,7 @@ class ConnectPlan internal constructor(
   }
 
   /** Returns the connection to use, which might be different from [connection]. */
-  override fun handleSuccess(): RealConnection {
+  override fun handleSuccess(): PooledConnection {
     call.client.routeDatabase.connected(route)
 
     val connection = this.connection!!

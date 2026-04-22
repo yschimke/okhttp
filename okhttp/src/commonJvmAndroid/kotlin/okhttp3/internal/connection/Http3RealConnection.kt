@@ -46,7 +46,7 @@ internal class Http3RealConnection(
   val taskRunner: TaskRunner,
   val connectionPool: RealConnectionPool,
   private val session: Http3Session,
-  internal val connectionListener: ConnectionListener,
+  override val connectionListener: ConnectionListener,
 ) : PooledConnection {
   override val route: Route = session.route
 
@@ -68,6 +68,9 @@ internal class Http3RealConnection(
 
   /** Timestamp when [calls] last reached zero. Updated by [RealConnectionPool] in Phase 2.2. */
   override var idleAtNs: Long = Long.MAX_VALUE
+
+  /** See [PooledConnection.incrementSuccessCount]. Guarded by [withLock]. */
+  private var successCount: Int = 0
 
   /** HTTP/3 sessions are always multiplexed; this mirrors [RealConnection.isMultiplexed]. */
   override val isMultiplexed: Boolean
@@ -152,6 +155,18 @@ internal class Http3RealConnection(
     }
     connectionListener.noNewExchanges(this)
   }
+
+  override fun incrementSuccessCount() {
+    withLock { successCount++ }
+  }
+
+  /**
+   * No-op until Phase 2.2c introduces H/3 connection coalescing. Today every
+   * Http3RealConnection is tied to exactly one origin (see [isEligible]), so there's
+   * nothing to flag — 421 Misdirected Request can't arise from coalescing that
+   * didn't happen.
+   */
+  override fun noCoalescedConnections() {}
 
   /**
    * Close the session forcibly — cancels in-flight streams and sends CONNECTION_CLOSE.

@@ -294,7 +294,7 @@ class RealRoutePlanner internal constructor(
     return authenticatedRequest ?: proxyConnectRequest
   }
 
-  override fun hasNext(failedConnection: RealConnection?): Boolean {
+  override fun hasNext(failedConnection: PooledConnection?): Boolean {
     if (deferredPlans.isNotEmpty()) {
       return true
     }
@@ -303,7 +303,11 @@ class RealRoutePlanner internal constructor(
       return true
     }
 
-    if (failedConnection != null) {
+    // Route retry only applies to TCP-backed connections: H/2's REFUSED_STREAM and
+    // spec-fallback semantics drive this. QUIC doesn't have an equivalent, so H/3
+    // failures skip the retry-the-same-route optimisation and fall through to picking
+    // a fresh route entirely.
+    if (failedConnection is RealConnection) {
       val retryRoute = retryRoute(failedConnection)
       if (retryRoute != null) {
         // Lock in the route because retryRoute() is racy and we don't want to call it twice.

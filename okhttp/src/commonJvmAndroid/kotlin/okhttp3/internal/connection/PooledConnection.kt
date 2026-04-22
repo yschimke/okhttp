@@ -45,7 +45,7 @@ import okhttp3.internal.http.RealInterceptorChain
  *    the lock across the acquire + health-check sequence, so concurrent state changes
  *    can't race inside one caller.
  */
-internal interface PooledConnection :
+interface PooledConnection :
   Connection,
   ExchangeCodec.Carrier,
   Lockable {
@@ -101,4 +101,24 @@ internal interface PooledConnection :
     client: OkHttpClient,
     chain: RealInterceptorChain,
   ): ExchangeCodec
+
+  /** The listener the pool notifies about lifecycle events on this connection. */
+  val connectionListener: ConnectionListener
+
+  /**
+   * Records one successful exchange against this connection. Used by the route
+   * failure accounting (one success flips the route from "avoid" back to eligible).
+   */
+  fun incrementSuccessCount()
+
+  /**
+   * Prevent this connection from serving requests whose hostname differs from the
+   * one it was established against. Called on a 421 Misdirected Request response,
+   * which signals that the coalescing decision was wrong for this origin.
+   *
+   * H/1.1 connections can't coalesce so this is a no-op for them. H/3 can coalesce
+   * in principle but Phase 2.2 doesn't ship the rules yet; the Http3RealConnection
+   * override is intentionally a no-op pending Phase 2.2c.
+   */
+  fun noCoalescedConnections()
 }

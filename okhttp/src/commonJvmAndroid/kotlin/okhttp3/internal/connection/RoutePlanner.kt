@@ -64,7 +64,7 @@ interface RoutePlanner {
    * @param failedConnection an optional connection that was resulted in a failure. If the failure
    *     is recoverable, the connection's route may be recovered for the retry.
    */
-  fun hasNext(failedConnection: RealConnection? = null): Boolean
+  fun hasNext(failedConnection: PooledConnection? = null): Boolean
 
   /**
    * Returns true if the host and port are unchanged from when this was created. This is used to
@@ -85,7 +85,7 @@ interface RoutePlanner {
 
     fun connectTlsEtc(): ConnectResult
 
-    fun handleSuccess(): RealConnection
+    fun handleSuccess(): PooledConnection
 
     fun cancel()
 

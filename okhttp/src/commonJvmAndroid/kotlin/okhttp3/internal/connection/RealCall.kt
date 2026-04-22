@@ -93,7 +93,7 @@ class RealCall(
   /** Finds an exchange to send the next request and receive the next response. */
   private var exchangeFinder: ExchangeFinder? = null
 
-  var connection: RealConnection? = null
+  var connection: PooledConnection? = null
     private set
   private var timeoutEarlyExit = false
 
@@ -315,7 +315,7 @@ class RealCall(
     return result
   }
 
-  fun acquireConnectionNoEvents(connection: RealConnection) {
+  fun acquireConnectionNoEvents(connection: PooledConnection) {
     connection.assertLockHeld()
 
     check(this.connection == null)

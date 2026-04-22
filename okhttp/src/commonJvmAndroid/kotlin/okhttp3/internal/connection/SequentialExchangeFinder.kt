@@ -21,7 +21,7 @@ import java.io.IOException
 internal class SequentialExchangeFinder(
   override val routePlanner: RoutePlanner,
 ) : ExchangeFinder {
-  override fun find(): RealConnection {
+  override fun find(): PooledConnection {
     var firstException: IOException? = null
     while (true) {
       if (routePlanner.isCanceled()) throw IOException("Canceled")

@@ -18,5 +18,5 @@ package okhttp3.internal.connection
 interface ExchangeFinder {
   val routePlanner: RoutePlanner
 
-  fun find(): RealConnection
+  fun find(): PooledConnection
 }
