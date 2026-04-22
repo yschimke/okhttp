@@ -236,6 +236,15 @@ open class OkHttpClient internal constructor(
   @get:JvmName("httpsServiceRecordResolver")
   val httpsServiceRecordResolver: HttpsServiceRecordResolver? = builder.httpsServiceRecordResolver
 
+  /**
+   * Pluggable HTTP/3 / QUIC transport. When non-null and [protocols] includes
+   * [Protocol.HTTP_3], the route planner may attempt HTTP/3 against origins that
+   * advertise it. `null` disables HTTP/3; the client falls through to the standard
+   * HTTP/2 / HTTP/1.1 stack.
+   */
+  @get:JvmName("http3Engine")
+  val http3Engine: Http3Engine? = builder.http3Engine
+
   @get:JvmName("hostnameVerifier")
   val hostnameVerifier: HostnameVerifier = builder.hostnameVerifier
 
@@ -626,6 +635,7 @@ open class OkHttpClient internal constructor(
     internal var protocols: List<Protocol> = DEFAULT_PROTOCOLS
     internal var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
     internal var httpsServiceRecordResolver: HttpsServiceRecordResolver? = null
+    internal var http3Engine: Http3Engine? = null
     internal var hostnameVerifier: HostnameVerifier = OkHostnameVerifier
     internal var certificatePinner: CertificatePinner = CertificatePinner.DEFAULT
     internal var certificateChainCleaner: CertificateChainCleaner? = null
@@ -663,6 +673,7 @@ open class OkHttpClient internal constructor(
       this.protocols = okHttpClient.protocols
       this.altSvcCache = okHttpClient.altSvcCache
       this.httpsServiceRecordResolver = okHttpClient.httpsServiceRecordResolver
+      this.http3Engine = okHttpClient.http3Engine
       this.hostnameVerifier = okHttpClient.hostnameVerifier
       this.certificatePinner = okHttpClient.certificatePinner
       this.certificateChainCleaner = okHttpClient.certificateChainCleaner
@@ -1092,6 +1103,22 @@ open class OkHttpClient internal constructor(
     fun httpsServiceRecordResolver(httpsServiceRecordResolver: HttpsServiceRecordResolver?) =
       apply {
         this.httpsServiceRecordResolver = httpsServiceRecordResolver
+      }
+
+    /**
+     * Installs a pluggable HTTP/3 / QUIC transport. When non-null and [protocols]
+     * includes [Protocol.HTTP_3], the route planner may attempt HTTP/3 against origins
+     * that advertise it (via Alt-Svc, HTTPS records, or explicit request preference).
+     * Pass `null` (the default) to disable HTTP/3 — the client falls through to the
+     * standard HTTP/2 / HTTP/1.1 stack.
+     *
+     * OkHttp does not ship a built-in [Http3Engine]; production implementations live in
+     * sibling modules that wrap a QUIC library (quiche4j, netty-incubator-codec-http3,
+     * ...). Keeping the native QUIC dep out of core is deliberate.
+     */
+    fun http3Engine(http3Engine: Http3Engine?) =
+      apply {
+        this.http3Engine = http3Engine
       }
 
     /**
