@@ -1064,6 +1064,15 @@ public final class okhttp3/MultipartReader$Part : java/io/Closeable {
 	public final fun headers ()Lokhttp3/Headers;
 }
 
+public abstract interface class okhttp3/NetworkIdentitySource {
+	public static final field Companion Lokhttp3/NetworkIdentitySource$Companion;
+	public static final field None Lokhttp3/NetworkIdentitySource;
+	public abstract fun currentNetworkId ()Ljava/lang/Object;
+}
+
+public final class okhttp3/NetworkIdentitySource$Companion {
+}
+
 public final class okhttp3/OkHttp {
 	public static final field INSTANCE Lokhttp3/OkHttp;
 	public static final field VERSION Ljava/lang/String;
@@ -1121,6 +1130,7 @@ public class okhttp3/OkHttpClient : okhttp3/Call$Factory, okhttp3/WebSocket$Fact
 	public final fun httpsServiceRecordResolver ()Lokhttp3/HttpsServiceRecordResolver;
 	public final fun interceptors ()Ljava/util/List;
 	public final fun minWebSocketMessageToCompress ()J
+	public final fun networkIdentitySource ()Lokhttp3/NetworkIdentitySource;
 	public final fun networkInterceptors ()Ljava/util/List;
 	public fun newBuilder ()Lokhttp3/OkHttpClient$Builder;
 	public fun newCall (Lokhttp3/Request;)Lokhttp3/Call;
@@ -1171,6 +1181,7 @@ public final class okhttp3/OkHttpClient$Builder {
 	public final fun httpsServiceRecordResolver (Lokhttp3/HttpsServiceRecordResolver;)Lokhttp3/OkHttpClient$Builder;
 	public final fun interceptors ()Ljava/util/List;
 	public final fun minWebSocketMessageToCompress (J)Lokhttp3/OkHttpClient$Builder;
+	public final fun networkIdentitySource (Lokhttp3/NetworkIdentitySource;)Lokhttp3/OkHttpClient$Builder;
 	public final fun networkInterceptors ()Ljava/util/List;
 	public final fun pingInterval (JLjava/util/concurrent/TimeUnit;)Lokhttp3/OkHttpClient$Builder;
 	public final fun pingInterval (Ljava/time/Duration;)Lokhttp3/OkHttpClient$Builder;

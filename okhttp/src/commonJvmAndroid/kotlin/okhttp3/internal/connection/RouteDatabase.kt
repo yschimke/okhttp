@@ -15,30 +15,56 @@
  */
 package okhttp3.internal.connection
 
+import okhttp3.NetworkIdentitySource
 import okhttp3.Route
 
 /**
- * A denylist of failed routes to avoid when creating a new connection to a target address. This is
- * used so that OkHttp can learn from its mistakes: if there was a failure attempting to connect to
- * a specific IP address or proxy server, that failure is remembered and alternate routes are
+ * A denylist of failed routes to avoid when creating a new connection to a target
+ * address. OkHttp learns from its mistakes: if a connection attempt to a specific IP
+ * address or proxy server fails, that failure is remembered and alternate routes are
  * preferred.
+ *
+ * Entries are scoped by the [NetworkIdentitySource]'s opaque network handle, so a
+ * failure recorded on (say) a WiFi network doesn't suppress retries after the device
+ * moves to cellular. With the default [NetworkIdentitySource.None] the source returns
+ * null for every call and all entries share the same null key — identical to the
+ * pre-2026 network-blind behaviour.
  */
-class RouteDatabase {
-  private val _failedRoutes = mutableSetOf<Route>()
+class RouteDatabase
+  @JvmOverloads
+  constructor(
+    private val networkIdentitySource: NetworkIdentitySource = NetworkIdentitySource.None,
+  ) {
+    private val _failedRoutes = mutableSetOf<Key>()
 
-  val failedRoutes: Set<Route>
-    @Synchronized get() = _failedRoutes.toSet()
+    /**
+     * Read-only snapshot of failed routes, ignoring network scoping. Retained for tools
+     * and tests that want to inspect the raw set.
+     */
+    val failedRoutes: Set<Route>
+      @Synchronized get() = _failedRoutes.mapTo(mutableSetOf()) { it.route }
 
-  /** Records a failure connecting to [failedRoute]. */
-  @Synchronized fun failed(failedRoute: Route) {
-    _failedRoutes.add(failedRoute)
+    /** Records a failure connecting to [failedRoute] on the current network. */
+    @Synchronized fun failed(failedRoute: Route) {
+      _failedRoutes.add(Key(failedRoute, networkIdentitySource.currentNetworkId()))
+    }
+
+    /** Records success connecting to [route] on the current network. */
+    @Synchronized fun connected(route: Route) {
+      _failedRoutes.remove(Key(route, networkIdentitySource.currentNetworkId()))
+    }
+
+    /**
+     * Returns true if [route] has failed recently on the *current* network and should
+     * be avoided. Returns false if the failure was recorded on a different network
+     * (identified by a different [NetworkIdentitySource.currentNetworkId] value) —
+     * that failure might not apply to the new network.
+     */
+    @Synchronized fun shouldPostpone(route: Route): Boolean =
+      Key(route, networkIdentitySource.currentNetworkId()) in _failedRoutes
+
+    private data class Key(
+      val route: Route,
+      val networkId: Any?,
+    )
   }
-
-  /** Records success connecting to [route]. */
-  @Synchronized fun connected(route: Route) {
-    _failedRoutes.remove(route)
-  }
-
-  /** Returns true if [route] has failed recently and should be avoided. */
-  @Synchronized fun shouldPostpone(route: Route): Boolean = route in _failedRoutes
-}
