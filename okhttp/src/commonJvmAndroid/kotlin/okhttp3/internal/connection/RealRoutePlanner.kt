@@ -32,6 +32,7 @@ import okhttp3.internal.closeQuietly
 import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.concurrent.withLock
 import okhttp3.internal.connection.RoutePlanner.Plan
+import okhttp3.internal.http3.Http3Decision
 import okhttp3.internal.platform.Platform
 import okhttp3.internal.toHostHeader
 
@@ -73,6 +74,25 @@ class RealRoutePlanner internal constructor(
 
     // Do blocking calls to plan a route for a new connection.
     val connect = planConnect()
+
+    // If HTTP/3 is viable for this origin and the current network hasn't already
+    // recorded a failure against this UDP peer, hand the route to the Http3Engine.
+    // A failure there evicts the Alt-Svc advertisement and marks the route in the
+    // (network-scoped) RouteDatabase, so the next plan() call falls through to TCP.
+    val engine = call.client.http3Engine
+    if (engine != null &&
+      !routeDatabase.shouldPostpone(connect.route) &&
+      Http3Decision.shouldAttempt(call.client, call.originalRequest, address)
+    ) {
+      return Http3ConnectPlan(
+        taskRunner = taskRunner,
+        connectionPool = connectionPool,
+        engine = engine,
+        call = call,
+        route = connect.route,
+        connectionListener = connectionPool.connectionListener,
+      )
+    }
 
     // Now that we have a set of IP addresses, make another attempt at getting a connection from
     // the pool. We have a better chance of matching thanks to connection coalescing.
