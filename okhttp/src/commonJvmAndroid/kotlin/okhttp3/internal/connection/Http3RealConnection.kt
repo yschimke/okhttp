@@ -19,14 +19,12 @@ import java.io.IOException
 import java.lang.ref.Reference
 import java.net.Socket as JavaNetSocket
 import okhttp3.Address
-import okhttp3.Connection
 import okhttp3.Handshake
 import okhttp3.Http3Session
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Route
 import okhttp3.internal.closeQuietly
-import okhttp3.internal.concurrent.Lockable
 import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.concurrent.withLock
 import okhttp3.internal.http.ExchangeCodec
@@ -49,32 +47,30 @@ internal class Http3RealConnection(
   val connectionPool: RealConnectionPool,
   private val session: Http3Session,
   internal val connectionListener: ConnectionListener,
-) : Connection,
-  ExchangeCodec.Carrier,
-  Lockable {
+) : PooledConnection {
   override val route: Route = session.route
 
   /**
    * Whether this connection refuses new streams. Set true by [trackFailure],
    * [noNewExchanges], or externally (pool eviction). Writes happen under [withLock].
    */
-  internal var noNewExchanges: Boolean = false
+  override var noNewExchanges: Boolean = false
 
   /**
    * Max concurrent streams the peer allows; seeded from [Http3Session.maxConcurrentStreams]
    * at construction time. Phase 2.2 will plumb live updates as the peer sends
    * `MAX_STREAMS` frames (QUIC, RFC 9000 §19.11).
    */
-  internal var allocationLimit: Int = session.maxConcurrentStreams
+  override var allocationLimit: Int = session.maxConcurrentStreams
 
   /** Active calls carried by this connection. Matches [RealConnection.calls]. */
-  internal val calls = mutableListOf<Reference<RealCall>>()
+  override val calls = mutableListOf<Reference<RealCall>>()
 
   /** Timestamp when [calls] last reached zero. Updated by [RealConnectionPool] in Phase 2.2. */
-  internal var idleAtNs: Long = Long.MAX_VALUE
+  override var idleAtNs: Long = Long.MAX_VALUE
 
   /** HTTP/3 sessions are always multiplexed; this mirrors [RealConnection.isMultiplexed]. */
-  internal val isMultiplexed: Boolean
+  override val isMultiplexed: Boolean
     get() = true
 
   override fun route(): Route = route
@@ -98,7 +94,7 @@ internal class Http3RealConnection(
    * analogue in Phase 2.2; today this is only reachable via unit tests.
    */
   @Throws(IOException::class)
-  internal fun newCodec(
+  override fun newCodec(
     client: OkHttpClient,
     chain: RealInterceptorChain,
   ): ExchangeCodec = Http3ExchangeCodec(client, this, chain, session)
@@ -109,7 +105,7 @@ internal class Http3RealConnection(
    * parity — QUIC's built-in liveness (IDLE_TIMEOUT, PATH_CHALLENGE) means there's no
    * separate "probe the socket" path to enable.
    */
-  internal fun isHealthy(doExtensiveChecks: Boolean): Boolean {
+  override fun isHealthy(doExtensiveChecks: Boolean): Boolean {
     @Suppress("UNUSED_PARAMETER") doExtensiveChecks
     if (noNewExchanges) return false
     return session.isHealthy
@@ -120,7 +116,7 @@ internal class Http3RealConnection(
    * the coalescing rules (same cert, same IP/UDP peer) — for now this is the minimal
    * "host + protocol match" check so pool integration tests have something to chew on.
    */
-  internal fun isEligible(
+  override fun isEligible(
     address: Address,
     @Suppress("UNUSED_PARAMETER") routes: List<Route>?,
   ): Boolean {

@@ -76,9 +76,7 @@ class RealConnection internal constructor(
   private val pingIntervalMillis: Int,
   internal val connectionListener: ConnectionListener,
 ) : Http2Connection.Listener(),
-  Connection,
-  ExchangeCodec.Carrier,
-  Lockable {
+  PooledConnection {
   private var http2Connection: Http2Connection? = null
 
   // These properties are guarded by `this`.
@@ -91,7 +89,7 @@ class RealConnection internal constructor(
    *
    * Once true this is always true. Guarded by this.
    */
-  var noNewExchanges = false
+  override var noNewExchanges = false
 
   /**
    * If true, this connection may not be used for coalesced requests. These are requests that could
@@ -112,20 +110,20 @@ class RealConnection internal constructor(
    * The maximum number of concurrent streams that can be carried by this connection. If
    * `allocations.size() < allocationLimit` then new streams can be created on this connection.
    */
-  internal var allocationLimit = 1
+  override var allocationLimit = 1
     private set
 
   /** Current calls carried by this connection. */
-  val calls = mutableListOf<Reference<RealCall>>()
+  override val calls = mutableListOf<Reference<RealCall>>()
 
   /** Timestamp when `allocations.size()` reached zero. Also assigned upon initial connection. */
-  var idleAtNs = Long.MAX_VALUE
+  override var idleAtNs = Long.MAX_VALUE
 
   /**
    * Returns true if this is an HTTP/2 connection. Such connections can be used in multiple HTTP
    * requests simultaneously.
    */
-  internal val isMultiplexed: Boolean
+  override val isMultiplexed: Boolean
     get() = http2Connection != null
 
   /** Prevent further exchanges from being created on this connection. */
@@ -178,7 +176,7 @@ class RealConnection internal constructor(
    * Returns true if this connection can carry a stream allocation to `address`. If non-null
    * `route` is the resolved route for a connection.
    */
-  internal fun isEligible(
+  override fun isEligible(
     address: Address,
     routes: List<Route>?,
   ): Boolean {
@@ -265,7 +263,7 @@ class RealConnection internal constructor(
   }
 
   @Throws(SocketException::class)
-  internal fun newCodec(
+  override fun newCodec(
     client: OkHttpClient,
     chain: RealInterceptorChain,
   ): ExchangeCodec {
@@ -297,7 +295,7 @@ class RealConnection internal constructor(
   override fun socket(): JavaNetSocket = javaNetSocket
 
   /** Returns true if this connection is ready to host new streams. */
-  fun isHealthy(doExtensiveChecks: Boolean): Boolean {
+  override fun isHealthy(doExtensiveChecks: Boolean): Boolean {
     assertLockNotHeld()
 
     val nowNs = System.nanoTime()
