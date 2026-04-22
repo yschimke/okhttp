@@ -136,6 +136,34 @@ class Http3RealConnectionTest {
     assertThat(connection.isEligible(address = session.route.address, routes = null)).isFalse()
   }
 
+  @Test fun `isEligible refuses after noCoalescedConnections on a different-host address`() {
+    val session = FakeHttp3Session()
+    val connection = newConnection(session)
+    connection.noCoalescedConnections() // simulate 421 Misdirected Request
+
+    // Same host is still allowed — noCoalescedConnections only disables coalescing
+    // for other hostnames.
+    assertThat(connection.isEligible(address = session.route.address, routes = null)).isTrue()
+
+    // A different host would need coalescing; noCoalescedConnections blocks it.
+    val otherHostAddress =
+      Address(
+        uriHost = "other.example.com",
+        uriPort = 443,
+        dns = Dns.SYSTEM,
+        socketFactory = SocketFactory.getDefault(),
+        sslSocketFactory = null,
+        hostnameVerifier = null,
+        certificatePinner = null,
+        proxyAuthenticator = Authenticator.NONE,
+        proxy = null,
+        protocols = listOf(Protocol.HTTP_3, Protocol.HTTP_1_1),
+        connectionSpecs = listOf(ConnectionSpec.MODERN_TLS),
+        proxySelector = java.net.ProxySelector.getDefault(),
+      )
+    assertThat(connection.isEligible(address = otherHostAddress, routes = null)).isFalse()
+  }
+
   private fun newConnection(
     session: Http3Session,
     listener: ConnectionListener = this.listener,

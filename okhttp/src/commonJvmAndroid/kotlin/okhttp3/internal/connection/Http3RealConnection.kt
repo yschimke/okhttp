@@ -17,10 +17,14 @@ package okhttp3.internal.connection
 
 import java.io.IOException
 import java.lang.ref.Reference
+import java.net.Proxy
 import java.net.Socket as JavaNetSocket
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLPeerUnverifiedException
 import okhttp3.Address
 import okhttp3.Handshake
 import okhttp3.Http3Session
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Route
@@ -30,6 +34,7 @@ import okhttp3.internal.concurrent.withLock
 import okhttp3.internal.http.ExchangeCodec
 import okhttp3.internal.http.RealInterceptorChain
 import okhttp3.internal.http3.Http3ExchangeCodec
+import okhttp3.internal.tls.OkHostnameVerifier
 
 /**
  * An HTTP/3 / QUIC connection to a remote web server, carrying 1 or more concurrent
@@ -71,6 +76,12 @@ internal class Http3RealConnection(
 
   /** See [PooledConnection.incrementSuccessCount]. Guarded by [withLock]. */
   private var successCount: Int = 0
+
+  /**
+   * True once this connection has returned 421 Misdirected Request; it then refuses to
+   * carry requests for hostnames other than its route's. Guarded by [withLock].
+   */
+  private var noCoalescedConnections: Boolean = false
 
   /** HTTP/3 sessions are always multiplexed; this mirrors [RealConnection.isMultiplexed]. */
   override val isMultiplexed: Boolean
@@ -117,17 +128,58 @@ internal class Http3RealConnection(
   }
 
   /**
-   * Whether this connection can carry a stream to [address]. Phase 2.2 will flesh out
-   * the coalescing rules (same cert, same IP/UDP peer) — for now this is the minimal
-   * "host + protocol match" check so pool integration tests have something to chew on.
+   * Whether this connection can carry a stream to [address]. Port of
+   * [RealConnection.isEligible] — same coalescing rules apply: QUIC sessions, like H/2
+   * connections, can carry requests for multiple origins as long as the peer cert
+   * covers the new host, the IP matches, and the hostname verifier is the default
+   * strict one.
    */
   override fun isEligible(
     address: Address,
-    @Suppress("UNUSED_PARAMETER") routes: List<Route>?,
+    routes: List<Route>?,
   ): Boolean {
     if (calls.size >= allocationLimit || noNewExchanges) return false
     if (!this.route.address.equalsNonHost(address)) return false
-    return address.url.host == this.route.address.url.host
+    if (address.url.host == this.route.address.url.host) return true
+
+    // Coalescing path — same checks as RealConnection.isEligible for H/2.
+    //
+    // 1. Must be multiplexed. H/3 is always multiplexed, but we still gate coalescing
+    //    on the 421-Misdirected-Request flag that the exchange machinery flips.
+    if (noCoalescedConnections) return false
+
+    // 2. Routes must share an IP/UDP peer (and both be DIRECT — MASQUE is out of scope).
+    if (routes == null || !routeMatchesAny(routes)) return false
+
+    // 3. Strict hostname verifier + cert must cover the new host.
+    if (address.hostnameVerifier !== OkHostnameVerifier) return false
+    if (!supportsUrl(address.url)) return false
+
+    // 4. Certificate pinner must approve.
+    try {
+      address.certificatePinner!!.check(address.url.host, session.handshake.peerCertificates)
+    } catch (_: SSLPeerUnverifiedException) {
+      return false
+    }
+
+    return true
+  }
+
+  private fun routeMatchesAny(candidates: List<Route>): Boolean =
+    candidates.any {
+      it.proxy.type() == Proxy.Type.DIRECT &&
+        route.proxy.type() == Proxy.Type.DIRECT &&
+        route.socketAddress == it.socketAddress
+    }
+
+  private fun supportsUrl(url: HttpUrl): Boolean {
+    val routeUrl = route.address.url
+    if (url.port != routeUrl.port) return false
+    if (url.host == routeUrl.host) return true
+    // Different host — only allowed when the cert chain names this URL's host.
+    val peerCerts = session.handshake.peerCertificates
+    if (peerCerts.isEmpty()) return false
+    return OkHostnameVerifier.verify(url.host, peerCerts[0] as X509Certificate)
   }
 
   override fun trackFailure(
@@ -161,12 +213,14 @@ internal class Http3RealConnection(
   }
 
   /**
-   * No-op until Phase 2.2c introduces H/3 connection coalescing. Today every
-   * Http3RealConnection is tied to exactly one origin (see [isEligible]), so there's
-   * nothing to flag — 421 Misdirected Request can't arise from coalescing that
-   * didn't happen.
+   * Retires this connection from coalescing (hostnames other than the route's). Called
+   * when the peer returns a 421 Misdirected Request, signalling that the coalescing
+   * decision was wrong for this origin. The connection can still carry requests for
+   * its original hostname.
    */
-  override fun noCoalescedConnections() {}
+  override fun noCoalescedConnections() {
+    withLock { noCoalescedConnections = true }
+  }
 
   /**
    * Close the session forcibly — cancels in-flight streams and sends CONNECTION_CLOSE.
