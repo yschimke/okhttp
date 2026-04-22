@@ -75,29 +75,39 @@ class RealRoutePlanner internal constructor(
     // Do blocking calls to plan a route for a new connection.
     val connect = planConnect()
 
+    // Now that we have a set of IP addresses, make another attempt at getting a connection from
+    // the pool. We have a better chance of matching thanks to connection coalescing.
+    val pooled2 = planReusePooledConnection(connect, connect.routes)
+    if (pooled2 != null) return pooled2
+
     // If HTTP/3 is viable for this origin and the current network hasn't already
     // recorded a failure against this UDP peer, hand the route to the Http3Engine.
-    // A failure there evicts the Alt-Svc advertisement and marks the route in the
-    // (network-scoped) RouteDatabase, so the next plan() call falls through to TCP.
+    // Queue the matching TCP plan as deferred so the exchange finder races them
+    // (FastFallback: 250ms stagger between H/3 and TCP on the same peer;
+    // Sequential: TCP runs if H/3 fails, via the deferred-plans path).
+    //
+    // On H/3 failure the plan evicts the Alt-Svc advertisement and marks the route
+    // in the (network-scoped) RouteDatabase, so even without a deferred TCP plan the
+    // next plan() call would fall through to TCP. The deferred-queue racing is a
+    // latency optimisation; the postponement-based fallback is the correctness
+    // backstop.
     val engine = call.client.http3Engine
     if (engine != null &&
       !routeDatabase.shouldPostpone(connect.route) &&
       Http3Decision.shouldAttempt(call.client, call.originalRequest, address)
     ) {
-      return Http3ConnectPlan(
-        taskRunner = taskRunner,
-        connectionPool = connectionPool,
-        engine = engine,
-        call = call,
-        route = connect.route,
-        connectionListener = connectionPool.connectionListener,
-      )
+      val h3Plan =
+        Http3ConnectPlan(
+          taskRunner = taskRunner,
+          connectionPool = connectionPool,
+          engine = engine,
+          call = call,
+          route = connect.route,
+          connectionListener = connectionPool.connectionListener,
+        )
+      deferredPlans.addLast(connect)
+      return h3Plan
     }
-
-    // Now that we have a set of IP addresses, make another attempt at getting a connection from
-    // the pool. We have a better chance of matching thanks to connection coalescing.
-    val pooled2 = planReusePooledConnection(connect, connect.routes)
-    if (pooled2 != null) return pooled2
 
     return connect
   }
