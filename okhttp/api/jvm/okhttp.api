@@ -622,7 +622,7 @@ public final class okhttp3/Gzip : okhttp3/CompressionInterceptor$DecompressionAl
 	public fun getEncoding ()Ljava/lang/String;
 }
 
-public final class okhttp3/Handshake {
+public class okhttp3/Handshake {
 	public static final field Companion Lokhttp3/Handshake$Companion;
 	public final fun -deprecated_cipherSuite ()Lokhttp3/CipherSuite;
 	public final fun -deprecated_localCertificates ()Ljava/util/List;
@@ -1502,4 +1502,3 @@ public abstract class okhttp3/WebSocketListener {
 	public fun onMessage (Lokhttp3/WebSocket;Lokio/ByteString;)V
 	public fun onOpen (Lokhttp3/WebSocket;Lokhttp3/Response;)V
 }
-

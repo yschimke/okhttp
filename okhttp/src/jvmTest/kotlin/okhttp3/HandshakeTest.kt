@@ -20,6 +20,7 @@ import assertk.assertions.containsExactly
 import assertk.assertions.hasMessage
 import assertk.assertions.isEmpty
 import assertk.assertions.isEqualTo
+import assertk.assertions.isNotEqualTo
 import assertk.assertions.isNull
 import java.io.IOException
 import java.security.cert.Certificate
@@ -126,6 +127,60 @@ class HandshakeTest {
     }
   }
 
+  @Test
+  fun subclassDoesNotEqualBaseHandshake() {
+    val handshake =
+      Handshake.get(
+        tlsVersion = TlsVersion.TLS_1_3,
+        cipherSuite = CipherSuite.TLS_AES_128_GCM_SHA256,
+        peerCertificates = listOf(serverCertificate.certificate),
+        localCertificates = listOf(),
+      )
+    val quicHandshake =
+      FakeQuicHandshake(
+        tlsVersion = TlsVersion.TLS_1_3,
+        cipherSuite = CipherSuite.TLS_AES_128_GCM_SHA256,
+        peerCertificates = listOf(serverCertificate.certificate),
+        localCertificates = listOf(),
+        originalDestinationConnectionId = "abc",
+      )
+
+    assertThat(handshake).isNotEqualTo(quicHandshake)
+    assertThat(quicHandshake).isNotEqualTo(handshake)
+  }
+
+  @Test
+  fun subclassEqualityIncludesExtensions() {
+    val quicHandshake =
+      FakeQuicHandshake(
+        tlsVersion = TlsVersion.TLS_1_3,
+        cipherSuite = CipherSuite.TLS_AES_128_GCM_SHA256,
+        peerCertificates = listOf(serverCertificate.certificate),
+        localCertificates = listOf(),
+        originalDestinationConnectionId = "abc",
+      )
+    val sameQuicHandshake =
+      FakeQuicHandshake(
+        tlsVersion = TlsVersion.TLS_1_3,
+        cipherSuite = CipherSuite.TLS_AES_128_GCM_SHA256,
+        peerCertificates = listOf(serverCertificate.certificate),
+        localCertificates = listOf(),
+        originalDestinationConnectionId = "abc",
+      )
+    val differentQuicHandshake =
+      FakeQuicHandshake(
+        tlsVersion = TlsVersion.TLS_1_3,
+        cipherSuite = CipherSuite.TLS_AES_128_GCM_SHA256,
+        peerCertificates = listOf(serverCertificate.certificate),
+        localCertificates = listOf(),
+        originalDestinationConnectionId = "def",
+      )
+
+    assertThat(quicHandshake).isEqualTo(sameQuicHandshake)
+    assertThat(quicHandshake.hashCode()).isEqualTo(sameQuicHandshake.hashCode())
+    assertThat(quicHandshake).isNotEqualTo(differentQuicHandshake)
+  }
+
   class FakeSSLSession(
     private val protocol: String,
     private val cipherSuite: String,
@@ -139,5 +194,19 @@ class HandshakeTest {
     override fun getPeerCertificates() = peerCertificates
 
     override fun getLocalCertificates() = localCertificates
+  }
+
+  class FakeQuicHandshake(
+    tlsVersion: TlsVersion,
+    cipherSuite: CipherSuite,
+    peerCertificates: List<Certificate>,
+    localCertificates: List<Certificate>,
+    private val originalDestinationConnectionId: String,
+  ) : Handshake(tlsVersion, cipherSuite, peerCertificates, localCertificates) {
+    override fun equalsHandshakeExtensions(other: Handshake): Boolean =
+      other is FakeQuicHandshake &&
+        other.originalDestinationConnectionId == originalDestinationConnectionId
+
+    override fun handshakeExtensionsHashCode(): Int = originalDestinationConnectionId.hashCode()
   }
 }
