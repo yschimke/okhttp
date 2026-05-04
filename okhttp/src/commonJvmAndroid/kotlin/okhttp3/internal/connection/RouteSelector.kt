@@ -70,7 +70,7 @@ class RouteSelector internal constructor(
       val proxy = nextProxy()
       for (inetSocketAddress in inetSocketAddresses) {
         val route = Route(address, proxy, inetSocketAddress)
-        if (routeDatabase.shouldPostpone(route)) {
+        if (routeDatabase.shouldPostpone(route, call)) {
           postponedRoutes += route
         } else {
           routes += route

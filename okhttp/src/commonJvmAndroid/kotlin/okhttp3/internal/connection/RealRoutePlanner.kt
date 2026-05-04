@@ -92,7 +92,7 @@ class RealRoutePlanner internal constructor(
     // latency optimisation; the postponement-based fallback is the correctness
     // backstop.
     val engine = call.client.http3Engine
-    if (engine != null && !routeDatabase.shouldPostpone(connect.route)) {
+    if (engine != null && !routeDatabase.shouldPostpone(connect.route, call)) {
       val decision = Http3Decision.decide(call.client, call.originalRequest, address)
       if (decision is Http3Decision.Decision.Attempt) {
         val h3Route = applyPortOverride(connect.route, decision.portOverride)

@@ -500,7 +500,7 @@ class ConnectPlan internal constructor(
 
   /** Returns the connection to use, which might be different from [connection]. */
   override fun handleSuccess(): PooledConnection {
-    call.client.routeDatabase.connected(route)
+    call.client.routeDatabase.connected(route, call)
 
     val connection = this.connection!!
     connection.connectionListener.connectEnd(connection, route, call)

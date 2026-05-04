@@ -17,6 +17,7 @@ package okhttp3.internal.connection
 
 import okhttp3.NetworkIdentitySource
 import okhttp3.Route
+import okhttp3.internal.connection.RealCall
 
 /**
  * A denylist of failed routes to avoid when creating a new connection to a target
@@ -26,9 +27,10 @@ import okhttp3.Route
  *
  * Entries are scoped by the [NetworkIdentitySource]'s opaque network handle, so a
  * failure recorded on (say) a WiFi network doesn't suppress retries after the device
- * moves to cellular. With the default [NetworkIdentitySource.None] the source returns
- * null for every call and all entries share the same null key — identical to the
- * pre-2026 network-blind behaviour.
+ * moves to cellular. The active call is supplied when available so implementations can
+ * use request/call overrides before falling back to a process-wide network. With the
+ * default [NetworkIdentitySource.None] the source returns null for every call and all
+ * entries share the same null key — identical to the pre-2026 network-blind behaviour.
  */
 class RouteDatabase
   @JvmOverloads
@@ -45,13 +47,19 @@ class RouteDatabase
       @Synchronized get() = _failedRoutes.mapTo(mutableSetOf()) { it.route }
 
     /** Records a failure connecting to [failedRoute] on the current network. */
-    @Synchronized fun failed(failedRoute: Route) {
-      _failedRoutes.add(Key(failedRoute, networkIdentitySource.currentNetworkId()))
+    @Synchronized fun failed(
+      failedRoute: Route,
+      call: RealCall? = null,
+    ) {
+      _failedRoutes.add(Key(failedRoute, networkIdentitySource.currentNetworkId(call)))
     }
 
     /** Records success connecting to [route] on the current network. */
-    @Synchronized fun connected(route: Route) {
-      _failedRoutes.remove(Key(route, networkIdentitySource.currentNetworkId()))
+    @Synchronized fun connected(
+      route: Route,
+      call: RealCall? = null,
+    ) {
+      _failedRoutes.remove(Key(route, networkIdentitySource.currentNetworkId(call)))
     }
 
     /**
@@ -60,8 +68,10 @@ class RouteDatabase
      * (identified by a different [NetworkIdentitySource.currentNetworkId] value) —
      * that failure might not apply to the new network.
      */
-    @Synchronized fun shouldPostpone(route: Route): Boolean =
-      Key(route, networkIdentitySource.currentNetworkId()) in _failedRoutes
+    @Synchronized fun shouldPostpone(
+      route: Route,
+      call: RealCall? = null,
+    ): Boolean = Key(route, networkIdentitySource.currentNetworkId(call)) in _failedRoutes
 
     private data class Key(
       val route: Route,

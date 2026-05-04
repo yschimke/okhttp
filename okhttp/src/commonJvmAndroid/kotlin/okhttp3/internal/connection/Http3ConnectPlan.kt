@@ -70,13 +70,13 @@ internal class Http3ConnectPlan(
 
       call.eventListener.secureConnectEnd(call, newSession.handshake)
       call.eventListener.connectEnd(call, route.socketAddress, route.proxy, okhttp3.Protocol.HTTP_3)
-      call.client.routeDatabase.connected(route)
+      call.client.routeDatabase.connected(route, call)
       return ConnectResult(plan = this)
     } catch (e: IOException) {
       // Teach the client not to retry this route on this network, and strip any
       // "origin advertises h3" signal from the Alt-Svc cache — without eviction the
       // next planner run would just re-attempt H/3 and fail the same way.
-      call.client.routeDatabase.failed(route)
+      call.client.routeDatabase.failed(route, call)
       val origin =
         AltSvcOrigin(
           scheme = route.address.url.scheme,

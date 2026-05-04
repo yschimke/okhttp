@@ -342,6 +342,7 @@ class RealConnection internal constructor(
   /** Track a bad route in the route database. Other routes will be attempted first. */
   internal fun connectFailed(
     client: OkHttpClient,
+    call: RealCall,
     failedRoute: Route,
     failure: IOException,
   ) {
@@ -355,7 +356,7 @@ class RealConnection internal constructor(
       )
     }
 
-    client.routeDatabase.failed(failedRoute)
+    client.routeDatabase.failed(failedRoute, call)
   }
 
   /**
@@ -398,7 +399,7 @@ class RealConnection internal constructor(
         // If this route hasn't completed a call, avoid it for new connections.
         if (successCount == 0) {
           if (e != null) {
-            connectFailed(call.client, route, e)
+            connectFailed(call.client, call, route, e)
           }
           routeFailureCount++
         }

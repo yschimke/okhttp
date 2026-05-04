@@ -64,7 +64,7 @@ interface Http3Session : Closeable {
    */
   @Throws(IOException::class)
   fun newStream(
-    headers: List<Http3Header>,
+    headers: Headers,
     hasRequestBody: Boolean,
   ): Http3Stream
 

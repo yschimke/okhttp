@@ -16,10 +16,10 @@
 package okhttp3
 
 /**
- * Source of an opaque identifier for the current network. OkHttp scopes its failure
- * memory by the returned value so a route that failed on one network (say, a WiFi with
- * a blocked UDP port) is retried when the device moves to another network (cellular)
- * instead of being postponed indefinitely.
+ * Source of an opaque identifier for the network used by a call. OkHttp scopes its
+ * failure memory by the returned value so a route that failed on one network (say, a
+ * WiFi with a blocked UDP port) is retried when the device moves to another network
+ * (cellular) instead of being postponed indefinitely.
  *
  * Install via [OkHttpClient.Builder.networkIdentitySource]. The default [None] returns
  * null and preserves OkHttp's traditional network-blind failure memory.
@@ -30,8 +30,9 @@ package okhttp3
  * class ConnectivityManagerNetworkIdentitySource(
  *   private val connectivityManager: ConnectivityManager,
  * ) : NetworkIdentitySource {
- *   override fun currentNetworkId(): Any? =
- *     connectivityManager.activeNetwork?.networkHandle
+ *   override fun currentNetworkId(call: Call?): Any? =
+ *     call?.request()?.tag(Network::class.java)?.networkHandle
+ *       ?: connectivityManager.activeNetwork?.networkHandle
  * }
  * ```
  *
@@ -48,10 +49,11 @@ package okhttp3
  */
 fun interface NetworkIdentitySource {
   /**
-   * Returns an opaque handle for the current network, or null if unknown or not
-   * applicable.
+   * Returns an opaque handle for the network used by [call], or null if unknown or not
+   * applicable. [call] is null when OkHttp consults failure memory outside a specific
+   * call context.
    */
-  fun currentNetworkId(): Any?
+  fun currentNetworkId(call: Call?): Any?
 
   companion object {
     /**
@@ -60,6 +62,6 @@ fun interface NetworkIdentitySource {
      * [OkHttpClient.Builder] when no other source is installed.
      */
     @JvmField
-    val None: NetworkIdentitySource = NetworkIdentitySource { null }
+    val None: NetworkIdentitySource = NetworkIdentitySource { _ -> null }
   }
 }

@@ -30,7 +30,7 @@ import java.io.IOException
  *  * HTTP/3 discovery (Alt-Svc cache, HTTPS DNS records, per-request
  *    [Http3Preference] tags).
  *  * Request/response mapping (the [okhttp3.internal.http3.Http3ExchangeCodec]
- *    that produces and consumes [Http3Header] lists).
+ *    that produces and consumes HTTP/2-style header lists).
  *  * EventListener dispatch around the handshake and exchange.
  *
  * The engine owns:

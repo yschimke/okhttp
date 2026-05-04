@@ -20,12 +20,6 @@ import java.net.ProtocolException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import okhttp3.Headers
-import okhttp3.Http3Header
-import okhttp3.Http3Header.Companion.RESPONSE_STATUS
-import okhttp3.Http3Header.Companion.TARGET_AUTHORITY
-import okhttp3.Http3Header.Companion.TARGET_METHOD
-import okhttp3.Http3Header.Companion.TARGET_PATH
-import okhttp3.Http3Header.Companion.TARGET_SCHEME
 import okhttp3.Http3Session
 import okhttp3.Http3Stream
 import okhttp3.OkHttpClient
@@ -38,6 +32,11 @@ import okhttp3.internal.http.HTTP_CONTINUE
 import okhttp3.internal.http.RealInterceptorChain
 import okhttp3.internal.http.RequestLine
 import okhttp3.internal.http.StatusLine
+import okhttp3.internal.http2.Header.Companion.RESPONSE_STATUS_UTF8
+import okhttp3.internal.http2.Header.Companion.TARGET_AUTHORITY_UTF8
+import okhttp3.internal.http2.Header.Companion.TARGET_METHOD_UTF8
+import okhttp3.internal.http2.Header.Companion.TARGET_PATH_UTF8
+import okhttp3.internal.http2.Header.Companion.TARGET_SCHEME_UTF8
 import okhttp3.internal.http.promisesBody
 import okhttp3.internal.immutableListOf
 import okio.Sink
@@ -49,7 +48,7 @@ import okio.Source
  * [okhttp3.internal.http2.Http2ExchangeCodec] — request/response are mapped through
  * [Http3Stream] in the same way H/2 maps through `Http2Stream`. Header framing and
  * QPACK encoding live inside the [Http3Session] implementation; the codec only deals
- * in [Http3Header] lists.
+ * in [Headers].
  */
 internal class Http3ExchangeCodec(
   @Suppress("unused") client: OkHttpClient,
@@ -180,26 +179,26 @@ internal class Http3ExchangeCodec(
      * §8.1.2.2): gRPC-over-HTTP/3 relies on it.
      */
     @JvmStatic
-    fun http3HeadersList(request: Request): List<Http3Header> {
+    fun http3HeadersList(request: Request): Headers {
       val headers = request.headers
-      val result = ArrayList<Http3Header>(headers.size + 4)
-      result.add(Http3Header(TARGET_METHOD, request.method))
-      result.add(Http3Header(TARGET_PATH, RequestLine.requestPath(request.url)))
+      val result = Headers.Builder()
+      result.addLenient(TARGET_METHOD_UTF8, request.method)
+      result.addLenient(TARGET_PATH_UTF8, RequestLine.requestPath(request.url))
       val host = request.header("Host")
       if (host != null) {
-        result.add(Http3Header(TARGET_AUTHORITY, host))
+        result.addLenient(TARGET_AUTHORITY_UTF8, host)
       }
-      result.add(Http3Header(TARGET_SCHEME, request.url.scheme))
+      result.addLenient(TARGET_SCHEME_UTF8, request.url.scheme)
 
       for (i in 0 until headers.size) {
         val name = headers.name(i).lowercase(Locale.US)
         if (name !in HTTP_3_SKIPPED_REQUEST_HEADERS ||
           name == TE && headers.value(i) == "trailers"
         ) {
-          result.add(Http3Header(name, headers.value(i)))
+          result.addLenient(name, headers.value(i))
         }
       }
-      return result
+      return result.build()
     }
 
     /**
@@ -207,16 +206,16 @@ internal class Http3ExchangeCodec(
      * everything else that survives the hop-by-hop filter goes into [Headers].
      */
     @JvmStatic
-    fun readHttp3HeadersList(headerBlock: List<Http3Header>): Response.Builder {
+    fun readHttp3HeadersList(headerBlock: Headers): Response.Builder {
       var statusLine: StatusLine? = null
       val headersBuilder = Headers.Builder()
-      for (header in headerBlock) {
-        val nameUtf8 = header.name.utf8()
-        val valueUtf8 = header.value.utf8()
-        if (header.name == RESPONSE_STATUS) {
-          statusLine = StatusLine.parse("HTTP/1.1 $valueUtf8")
-        } else if (nameUtf8 !in HTTP_3_SKIPPED_RESPONSE_HEADERS) {
-          headersBuilder.addLenient(nameUtf8, valueUtf8)
+      for (i in 0 until headerBlock.size) {
+        val name = headerBlock.name(i)
+        val value = headerBlock.value(i)
+        if (name == RESPONSE_STATUS_UTF8) {
+          statusLine = StatusLine.parse("HTTP/1.1 $value")
+        } else if (name !in HTTP_3_SKIPPED_RESPONSE_HEADERS) {
+          headersBuilder.addLenient(name, value)
         }
       }
       if (statusLine == null) throw ProtocolException("Expected ':status' header not present")
@@ -229,14 +228,14 @@ internal class Http3ExchangeCodec(
         .headers(headersBuilder.build())
     }
 
-    private fun trailersToHeaders(trailers: List<Http3Header>): Headers {
+    private fun trailersToHeaders(trailers: Headers): Headers {
       val builder = Headers.Builder()
-      for (header in trailers) {
-        val nameUtf8 = header.name.utf8()
+      for (i in 0 until trailers.size) {
+        val name = trailers.name(i)
         // Trailers never contain pseudo-headers per RFC 9114 §4.1.
-        if (nameUtf8.startsWith(":")) continue
-        if (nameUtf8 in HTTP_3_SKIPPED_RESPONSE_HEADERS) continue
-        builder.addLenient(nameUtf8, header.value.utf8())
+        if (name.startsWith(":")) continue
+        if (name in HTTP_3_SKIPPED_RESPONSE_HEADERS) continue
+        builder.addLenient(name, trailers.value(i))
       }
       return builder.build()
     }

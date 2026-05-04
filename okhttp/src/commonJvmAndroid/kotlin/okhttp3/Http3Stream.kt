@@ -59,7 +59,7 @@ interface Http3Stream : Socket {
    * @throws IOException on stream reset, connection loss, or timeout.
    */
   @Throws(IOException::class)
-  fun takeHeaders(callerIsIdle: Boolean): List<Http3Header>
+  fun takeHeaders(callerIsIdle: Boolean): Headers
 
   /**
    * Non-blocking check for trailers. Returns:
@@ -71,5 +71,5 @@ interface Http3Stream : Socket {
    * @throws IOException on stream reset.
    */
   @Throws(IOException::class)
-  fun peekTrailers(): List<Http3Header>?
+  fun peekTrailers(): Headers?
 }
