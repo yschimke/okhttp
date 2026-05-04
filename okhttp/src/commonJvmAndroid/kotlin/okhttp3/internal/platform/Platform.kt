@@ -219,7 +219,9 @@ open class Platform {
       PublicSuffixDatabase.resetForTests()
     }
 
-    fun alpnProtocolNames(protocols: List<Protocol>) = protocols.filter { it != Protocol.HTTP_1_0 }.map { it.toString() }
+    // HTTP/1.0 predates ALPN; HTTP/3 is QUIC-only and never advertised over TCP TLS.
+    fun alpnProtocolNames(protocols: List<Protocol>) =
+      protocols.filter { it != Protocol.HTTP_1_0 && it != Protocol.HTTP_3 }.map { it.toString() }
 
     val isAndroid: Boolean
       get() = PlatformRegistry.isAndroid

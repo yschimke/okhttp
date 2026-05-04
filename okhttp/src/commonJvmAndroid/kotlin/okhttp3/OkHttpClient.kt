@@ -218,6 +218,46 @@ open class OkHttpClient internal constructor(
   @get:JvmName("protocols")
   val protocols: List<Protocol> = builder.protocols
 
+  /**
+   * Cache of `Alt-Svc` advertisements (RFC 7838). Populated as responses arrive and
+   * consulted by the route planner to prefer HTTP/3 on later requests to the same origin.
+   * Defaults to a fresh in-memory cache per client; replace with a persistent
+   * implementation to carry entries across process restarts.
+   */
+  @get:JvmName("altSvcCache")
+  val altSvcCache: AltSvcCache = builder.altSvcCache
+
+  /**
+   * Optional resolver for DNS HTTPS records (RFC 9460). When non-null the route planner
+   * consults it to decide whether an origin advertises HTTP/3 before attempting the
+   * handshake. No default is provided — the on-the-wire HTTPS/SVCB parser lives in
+   * optional dependencies.
+   */
+  @get:JvmName("httpsServiceRecordResolver")
+  val httpsServiceRecordResolver: HttpsServiceRecordResolver? = builder.httpsServiceRecordResolver
+
+  /**
+   * Pluggable HTTP/3 / QUIC transport. When non-null and [protocols] includes
+   * [Protocol.HTTP_3], the route planner may attempt HTTP/3 against origins that
+   * advertise it. `null` disables HTTP/3; the client falls through to the standard
+   * HTTP/2 / HTTP/1.1 stack.
+   */
+  @get:JvmName("http3Engine")
+  val http3Engine: Http3Engine? = builder.http3Engine
+
+  /**
+   * Source of an opaque identifier for the current network. Used by the internal
+   * route-failure database to scope failures per network so a route that failed on
+   * one network (e.g. a WiFi that blocks UDP) is retried on another (cellular).
+   *
+   * Defaults to [NetworkIdentitySource.None], which returns null and preserves the
+   * historical network-blind failure-memory behaviour. Install a platform-aware
+   * source (e.g. one backed by Android's `ConnectivityManager.activeNetwork`) to
+   * get per-network failure memory.
+   */
+  @get:JvmName("networkIdentitySource")
+  val networkIdentitySource: NetworkIdentitySource = builder.networkIdentitySource
+
   @get:JvmName("hostnameVerifier")
   val hostnameVerifier: HostnameVerifier = builder.hostnameVerifier
 
@@ -263,7 +303,8 @@ open class OkHttpClient internal constructor(
   @get:JvmName("minWebSocketMessageToCompress")
   val minWebSocketMessageToCompress: Long = builder.minWebSocketMessageToCompress
 
-  internal val routeDatabase: RouteDatabase = builder.routeDatabase ?: RouteDatabase()
+  internal val routeDatabase: RouteDatabase =
+    builder.routeDatabase ?: RouteDatabase(builder.networkIdentitySource)
   internal val taskRunner: TaskRunner = builder.taskRunner ?: TaskRunner.INSTANCE
 
   @get:JvmName("connectionPool")
@@ -606,6 +647,10 @@ open class OkHttpClient internal constructor(
     internal var x509TrustManagerOrNull: X509TrustManager? = null
     internal var connectionSpecs: List<ConnectionSpec> = DEFAULT_CONNECTION_SPECS
     internal var protocols: List<Protocol> = DEFAULT_PROTOCOLS
+    internal var altSvcCache: AltSvcCache = InMemoryAltSvcCache()
+    internal var httpsServiceRecordResolver: HttpsServiceRecordResolver? = null
+    internal var http3Engine: Http3Engine? = null
+    internal var networkIdentitySource: NetworkIdentitySource = NetworkIdentitySource.None
     internal var hostnameVerifier: HostnameVerifier = OkHostnameVerifier
     internal var certificatePinner: CertificatePinner = CertificatePinner.DEFAULT
     internal var certificateChainCleaner: CertificateChainCleaner? = null
@@ -641,6 +686,10 @@ open class OkHttpClient internal constructor(
       this.x509TrustManagerOrNull = okHttpClient.x509TrustManager
       this.connectionSpecs = okHttpClient.connectionSpecs
       this.protocols = okHttpClient.protocols
+      this.altSvcCache = okHttpClient.altSvcCache
+      this.httpsServiceRecordResolver = okHttpClient.httpsServiceRecordResolver
+      this.http3Engine = okHttpClient.http3Engine
+      this.networkIdentitySource = okHttpClient.networkIdentitySource
       this.hostnameVerifier = okHttpClient.hostnameVerifier
       this.certificatePinner = okHttpClient.certificatePinner
       this.certificateChainCleaner = okHttpClient.certificateChainCleaner
@@ -1047,6 +1096,67 @@ open class OkHttpClient internal constructor(
 
         // Assign as an unmodifiable list. This is effectively immutable.
         this.protocols = protocolsCopy.unmodifiable()
+      }
+
+    /**
+     * Sets the `Alt-Svc` (RFC 7838) cache consulted by the route planner to prefer
+     * HTTP/3 for origins that previously advertised it. Defaults to a fresh
+     * [InMemoryAltSvcCache]. Replace with a persistent implementation to carry
+     * advertisements across process restarts.
+     */
+    fun altSvcCache(altSvcCache: AltSvcCache) =
+      apply {
+        this.altSvcCache = altSvcCache
+      }
+
+    /**
+     * Sets the resolver for DNS HTTPS records (RFC 9460). When non-null the route planner
+     * consults it to decide whether an origin advertises HTTP/3 before attempting the
+     * handshake. OkHttp does not ship a default — the on-the-wire parser lives in
+     * optional dependencies (e.g. dnsjava on the JVM, `android.net.DnsResolver` on
+     * Android 29+).
+     */
+    fun httpsServiceRecordResolver(httpsServiceRecordResolver: HttpsServiceRecordResolver?) =
+      apply {
+        this.httpsServiceRecordResolver = httpsServiceRecordResolver
+      }
+
+    /**
+     * Installs a pluggable HTTP/3 / QUIC transport. When non-null and [protocols]
+     * includes [Protocol.HTTP_3], the route planner may attempt HTTP/3 against origins
+     * that advertise it (via Alt-Svc, HTTPS records, or explicit request preference).
+     * Pass `null` (the default) to disable HTTP/3 — the client falls through to the
+     * standard HTTP/2 / HTTP/1.1 stack.
+     *
+     * OkHttp does not ship a built-in [Http3Engine]; production implementations live in
+     * sibling modules that wrap a QUIC library (quiche4j, netty-incubator-codec-http3,
+     * ...). Keeping the native QUIC dep out of core is deliberate.
+     */
+    fun http3Engine(http3Engine: Http3Engine?) =
+      apply {
+        this.http3Engine = http3Engine
+      }
+
+    /**
+     * Installs a source of opaque network-identity handles. OkHttp's internal
+     * route-failure database scopes entries by the current network, so a route
+     * that failed on one network (e.g. a WiFi with a blocked UDP port) is retried
+     * when the device moves to another network (e.g. cellular) instead of being
+     * postponed indefinitely.
+     *
+     * The default is [NetworkIdentitySource.None], which returns null for every
+     * call and preserves OkHttp's historical network-blind failure memory. On
+     * Android, typically wire this to `ConnectivityManager.activeNetwork?.networkHandle`.
+     *
+     * Must be set before [build]; changing the source on an existing client has
+     * no effect on the pre-existing route database.
+     */
+    fun networkIdentitySource(networkIdentitySource: NetworkIdentitySource) =
+      apply {
+        if (networkIdentitySource != this.networkIdentitySource) {
+          this.routeDatabase = null
+        }
+        this.networkIdentitySource = networkIdentitySource
       }
 
     /**

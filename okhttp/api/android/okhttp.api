@@ -27,6 +27,65 @@ public final class okhttp3/Address {
 	public final fun url ()Lokhttp3/HttpUrl;
 }
 
+public abstract interface class okhttp3/AltSvcCache {
+	public abstract fun get (Lokhttp3/AltSvcOrigin;)Ljava/util/List;
+	public abstract fun put (Lokhttp3/AltSvcOrigin;Ljava/util/List;)V
+	public abstract fun remove (Lokhttp3/AltSvcOrigin;)V
+}
+
+public final class okhttp3/AltSvcEntry {
+	public static final field Companion Lokhttp3/AltSvcEntry$Companion;
+	public static final field DEFAULT_MA_SECONDS J
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;IJZ)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;IJZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()J
+	public final fun component5 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;IJZ)Lokhttp3/AltSvcEntry;
+	public static synthetic fun copy$default (Lokhttp3/AltSvcEntry;Ljava/lang/String;Ljava/lang/String;IJZILjava/lang/Object;)Lokhttp3/AltSvcEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExpiresAtMillis ()J
+	public final fun getHost ()Ljava/lang/String;
+	public final fun getPersist ()Z
+	public final fun getPort ()I
+	public final fun getProtocolId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun isExpired ()Z
+	public static final fun parseHeader (Ljava/lang/String;)Ljava/util/List;
+	public static final fun parseHeader (Ljava/lang/String;J)Ljava/util/List;
+	public final fun toHeaderValue ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class okhttp3/AltSvcEntry$Companion {
+	public final fun parseHeader (Ljava/lang/String;)Ljava/util/List;
+	public final fun parseHeader (Ljava/lang/String;J)Ljava/util/List;
+	public static synthetic fun parseHeader$default (Lokhttp3/AltSvcEntry$Companion;Ljava/lang/String;JILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class okhttp3/AltSvcOrigin {
+	public static final field Companion Lokhttp3/AltSvcOrigin$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;I)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;I)Lokhttp3/AltSvcOrigin;
+	public static synthetic fun copy$default (Lokhttp3/AltSvcOrigin;Ljava/lang/String;Ljava/lang/String;IILjava/lang/Object;)Lokhttp3/AltSvcOrigin;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHost ()Ljava/lang/String;
+	public final fun getPort ()I
+	public final fun getScheme ()Ljava/lang/String;
+	public fun hashCode ()I
+	public static final fun of (Lokhttp3/HttpUrl;)Lokhttp3/AltSvcOrigin;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class okhttp3/AltSvcOrigin$Companion {
+	public final fun of (Lokhttp3/HttpUrl;)Lokhttp3/AltSvcOrigin;
+}
+
 public abstract interface class okhttp3/Authenticator {
 	public static final field Companion Lokhttp3/Authenticator$Companion;
 	public static final field JAVA_NET_AUTHENTICATOR Lokhttp3/Authenticator;
@@ -563,7 +622,7 @@ public final class okhttp3/Gzip : okhttp3/CompressionInterceptor$DecompressionAl
 	public fun getEncoding ()Ljava/lang/String;
 }
 
-public final class okhttp3/Handshake {
+public class okhttp3/Handshake {
 	public static final field Companion Lokhttp3/Handshake$Companion;
 	public final fun -deprecated_cipherSuite ()Lokhttp3/CipherSuite;
 	public final fun -deprecated_localCertificates ()Ljava/util/List;
@@ -634,6 +693,87 @@ public final class okhttp3/Headers$Companion {
 	public final fun -deprecated_of ([Ljava/lang/String;)Lokhttp3/Headers;
 	public final fun of (Ljava/util/Map;)Lokhttp3/Headers;
 	public final fun of ([Ljava/lang/String;)Lokhttp3/Headers;
+}
+
+public abstract interface class okhttp3/Http3Engine {
+	public abstract fun connect (Lokhttp3/OkHttpClient;Lokhttp3/Route;)Lokhttp3/Http3Session;
+}
+
+public final class okhttp3/Http3Header {
+	public static final field Companion Lokhttp3/Http3Header$Companion;
+	public static final field RESPONSE_STATUS Lokio/ByteString;
+	public static final field TARGET_AUTHORITY Lokio/ByteString;
+	public static final field TARGET_METHOD Lokio/ByteString;
+	public static final field TARGET_PATH Lokio/ByteString;
+	public static final field TARGET_SCHEME Lokio/ByteString;
+	public final field name Lokio/ByteString;
+	public final field value Lokio/ByteString;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public fun <init> (Lokio/ByteString;Ljava/lang/String;)V
+	public fun <init> (Lokio/ByteString;Lokio/ByteString;)V
+	public final fun component1 ()Lokio/ByteString;
+	public final fun component2 ()Lokio/ByteString;
+	public final fun copy (Lokio/ByteString;Lokio/ByteString;)Lokhttp3/Http3Header;
+	public static synthetic fun copy$default (Lokhttp3/Http3Header;Lokio/ByteString;Lokio/ByteString;ILjava/lang/Object;)Lokhttp3/Http3Header;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class okhttp3/Http3Header$Companion {
+}
+
+public abstract class okhttp3/Http3Preference {
+	public static final field Companion Lokhttp3/Http3Preference$Companion;
+	public static final fun of (Lokhttp3/Request;)Lokhttp3/Http3Preference;
+}
+
+public final class okhttp3/Http3Preference$Companion {
+	public final fun of (Lokhttp3/Request;)Lokhttp3/Http3Preference;
+}
+
+public final class okhttp3/Http3Preference$Current : okhttp3/Http3Preference {
+	public static final field INSTANCE Lokhttp3/Http3Preference$Current;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class okhttp3/Http3Preference$Force : okhttp3/Http3Preference {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Integer;Z)V
+	public synthetic fun <init> (Ljava/lang/Integer;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Z
+	public final fun copy (Ljava/lang/Integer;Z)Lokhttp3/Http3Preference$Force;
+	public static synthetic fun copy$default (Lokhttp3/Http3Preference$Force;Ljava/lang/Integer;ZILjava/lang/Object;)Lokhttp3/Http3Preference$Force;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFallback ()Z
+	public final fun getPortOverride ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class okhttp3/Http3Preference$ForceOff : okhttp3/Http3Preference {
+	public static final field INSTANCE Lokhttp3/Http3Preference$ForceOff;
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class okhttp3/Http3Session : java/io/Closeable {
+	public abstract fun close ()V
+	public abstract fun flush ()V
+	public abstract fun getHandshake ()Lokhttp3/Handshake;
+	public abstract fun getMaxConcurrentStreams ()I
+	public abstract fun getRoute ()Lokhttp3/Route;
+	public abstract fun isHealthy ()Z
+	public abstract fun newStream (Ljava/util/List;Z)Lokhttp3/Http3Stream;
+}
+
+public abstract interface class okhttp3/Http3Stream : okio/Socket {
+	public abstract fun getSession ()Lokhttp3/Http3Session;
+	public abstract fun isSourceComplete ()Z
+	public abstract fun peekTrailers ()Ljava/util/List;
+	public abstract fun readTimeout ()Lokio/Timeout;
+	public abstract fun takeHeaders (Z)Ljava/util/List;
+	public abstract fun writeTimeout ()Lokio/Timeout;
 }
 
 public final class okhttp3/HttpUrl {
@@ -738,6 +878,41 @@ public final class okhttp3/HttpUrl$Companion {
 	public final fun get (Ljava/net/URI;)Lokhttp3/HttpUrl;
 	public final fun get (Ljava/net/URL;)Lokhttp3/HttpUrl;
 	public final fun parse (Ljava/lang/String;)Lokhttp3/HttpUrl;
+}
+
+public final class okhttp3/HttpsServiceRecord {
+	public fun <init> (ILjava/lang/String;Ljava/lang/Integer;Ljava/util/List;Ljava/util/List;Lokio/ByteString;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Lokio/ByteString;
+	public final fun copy (ILjava/lang/String;Ljava/lang/Integer;Ljava/util/List;Ljava/util/List;Lokio/ByteString;)Lokhttp3/HttpsServiceRecord;
+	public static synthetic fun copy$default (Lokhttp3/HttpsServiceRecord;ILjava/lang/String;Ljava/lang/Integer;Ljava/util/List;Ljava/util/List;Lokio/ByteString;ILjava/lang/Object;)Lokhttp3/HttpsServiceRecord;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlpnIds ()Ljava/util/List;
+	public final fun getEchConfigList ()Lokio/ByteString;
+	public final fun getIpAddressHints ()Ljava/util/List;
+	public final fun getPort ()Ljava/lang/Integer;
+	public final fun getPriority ()I
+	public final fun getSupportsHttp3 ()Z
+	public final fun getTargetName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class okhttp3/HttpsServiceRecordResolver {
+	public abstract fun lookup (Ljava/lang/String;)Ljava/util/List;
+}
+
+public final class okhttp3/InMemoryAltSvcCache : okhttp3/AltSvcCache {
+	public fun <init> ()V
+	public fun get (Lokhttp3/AltSvcOrigin;)Ljava/util/List;
+	public final fun load (Ljava/util/Map;)V
+	public fun put (Lokhttp3/AltSvcOrigin;Ljava/util/List;)V
+	public fun remove (Lokhttp3/AltSvcOrigin;)V
+	public final fun snapshot ()Ljava/util/Map;
 }
 
 public abstract interface class okhttp3/Interceptor {
@@ -889,6 +1064,15 @@ public final class okhttp3/MultipartReader$Part : java/io/Closeable {
 	public final fun headers ()Lokhttp3/Headers;
 }
 
+public abstract interface class okhttp3/NetworkIdentitySource {
+	public static final field Companion Lokhttp3/NetworkIdentitySource$Companion;
+	public static final field None Lokhttp3/NetworkIdentitySource;
+	public abstract fun currentNetworkId ()Ljava/lang/Object;
+}
+
+public final class okhttp3/NetworkIdentitySource$Companion {
+}
+
 public final class okhttp3/OkHttp {
 	public static final field INSTANCE Lokhttp3/OkHttp;
 	public static final field VERSION Ljava/lang/String;
@@ -925,6 +1109,7 @@ public class okhttp3/OkHttpClient : okhttp3/Call$Factory, okhttp3/WebSocket$Fact
 	public final fun -deprecated_writeTimeoutMillis ()I
 	public fun <init> ()V
 	public final fun address (Lokhttp3/HttpUrl;)Lokhttp3/Address;
+	public final fun altSvcCache ()Lokhttp3/AltSvcCache;
 	public final fun authenticator ()Lokhttp3/Authenticator;
 	public final fun cache ()Lokhttp3/Cache;
 	public final fun callTimeoutMillis ()I
@@ -941,8 +1126,11 @@ public class okhttp3/OkHttpClient : okhttp3/Call$Factory, okhttp3/WebSocket$Fact
 	public final fun followRedirects ()Z
 	public final fun followSslRedirects ()Z
 	public final fun hostnameVerifier ()Ljavax/net/ssl/HostnameVerifier;
+	public final fun http3Engine ()Lokhttp3/Http3Engine;
+	public final fun httpsServiceRecordResolver ()Lokhttp3/HttpsServiceRecordResolver;
 	public final fun interceptors ()Ljava/util/List;
 	public final fun minWebSocketMessageToCompress ()J
+	public final fun networkIdentitySource ()Lokhttp3/NetworkIdentitySource;
 	public final fun networkInterceptors ()Ljava/util/List;
 	public fun newBuilder ()Lokhttp3/OkHttpClient$Builder;
 	public fun newCall (Lokhttp3/Request;)Lokhttp3/Call;
@@ -967,6 +1155,7 @@ public final class okhttp3/OkHttpClient$Builder {
 	public fun <init> ()V
 	public final fun addInterceptor (Lokhttp3/Interceptor;)Lokhttp3/OkHttpClient$Builder;
 	public final fun addNetworkInterceptor (Lokhttp3/Interceptor;)Lokhttp3/OkHttpClient$Builder;
+	public final fun altSvcCache (Lokhttp3/AltSvcCache;)Lokhttp3/OkHttpClient$Builder;
 	public final fun authenticator (Lokhttp3/Authenticator;)Lokhttp3/OkHttpClient$Builder;
 	public final fun build ()Lokhttp3/OkHttpClient;
 	public final fun cache (Lokhttp3/Cache;)Lokhttp3/OkHttpClient$Builder;
@@ -988,8 +1177,11 @@ public final class okhttp3/OkHttpClient$Builder {
 	public final fun followRedirects (Z)Lokhttp3/OkHttpClient$Builder;
 	public final fun followSslRedirects (Z)Lokhttp3/OkHttpClient$Builder;
 	public final fun hostnameVerifier (Ljavax/net/ssl/HostnameVerifier;)Lokhttp3/OkHttpClient$Builder;
+	public final fun http3Engine (Lokhttp3/Http3Engine;)Lokhttp3/OkHttpClient$Builder;
+	public final fun httpsServiceRecordResolver (Lokhttp3/HttpsServiceRecordResolver;)Lokhttp3/OkHttpClient$Builder;
 	public final fun interceptors ()Ljava/util/List;
 	public final fun minWebSocketMessageToCompress (J)Lokhttp3/OkHttpClient$Builder;
+	public final fun networkIdentitySource (Lokhttp3/NetworkIdentitySource;)Lokhttp3/OkHttpClient$Builder;
 	public final fun networkInterceptors ()Ljava/util/List;
 	public final fun pingInterval (JLjava/util/concurrent/TimeUnit;)Lokhttp3/OkHttpClient$Builder;
 	public final fun pingInterval (Ljava/time/Duration;)Lokhttp3/OkHttpClient$Builder;
@@ -1311,4 +1503,3 @@ public abstract class okhttp3/WebSocketListener {
 	public fun onMessage (Lokhttp3/WebSocket;Lokio/ByteString;)V
 	public fun onOpen (Lokhttp3/WebSocket;Lokhttp3/Response;)V
 }
-

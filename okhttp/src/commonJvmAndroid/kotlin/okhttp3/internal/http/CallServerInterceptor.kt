@@ -181,6 +181,11 @@ object CallServerInterceptor : Interceptor {
           "HTTP $code had non-zero Content-Length: ${response.body.contentLength()}",
         )
       }
+
+      // Record any Alt-Svc advertisement so subsequent calls can prefer HTTP/3.
+      // Runs on every network response regardless of protocol (H/1.1, H/2, H/3).
+      updateAltSvcCache(realChain, response)
+
       return response
     } catch (e: IOException) {
       if (sendRequestException != null) {
@@ -189,6 +194,24 @@ object CallServerInterceptor : Interceptor {
       }
       throw e
     }
+  }
+
+  /**
+   * Parse any `Alt-Svc` header on [response] and write it to the client's
+   * [okhttp3.AltSvcCache]. Applies to every network response regardless of transport —
+   * an HTTP/1.1 or HTTP/2 response that advertises `h3` lets the next call attempt
+   * HTTP/3 against the same origin. `Alt-Svc: clear` evicts the cache entry.
+   */
+  private fun updateAltSvcCache(
+    chain: RealInterceptorChain,
+    response: Response,
+  ) {
+    val client = chain.call.client
+    val altSvcHeader = response.header("Alt-Svc") ?: return
+    val url = chain.request.url
+    val origin = okhttp3.AltSvcOrigin(scheme = url.scheme, host = url.host, port = url.port)
+    val entries = okhttp3.AltSvcEntry.parseHeader(altSvcHeader)
+    client.altSvcCache.put(origin, entries)
   }
 
   private fun shouldIgnoreAndWaitForRealResponse(code: Int): Boolean =

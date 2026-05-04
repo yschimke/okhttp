@@ -17,7 +17,7 @@ package okhttp3.internal.connection
 
 /** Reuse a connection from the pool. */
 internal class ReusePlan(
-  val connection: RealConnection,
+  val connection: PooledConnection,
 ) : RoutePlanner.Plan {
   override val isReady = true
 

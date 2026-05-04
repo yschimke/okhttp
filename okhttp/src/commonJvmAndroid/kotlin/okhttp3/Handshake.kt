@@ -30,7 +30,7 @@ import okhttp3.internal.toImmutableList
  * This value object describes a completed handshake. Use [ConnectionSpec] to set policy for new
  * handshakes.
  */
-class Handshake internal constructor(
+open class Handshake internal constructor(
   /**
    * Returns the TLS version used for this connection. This value wasn't tracked prior to OkHttp
    * 3.0. For responses cached by preceding versions this returns [TlsVersion.SSL_3_0].
@@ -43,6 +43,24 @@ class Handshake internal constructor(
   // Delayed provider of peerCertificates, to allow lazy cleaning.
   peerCertificatesFn: () -> List<Certificate>,
 ) {
+  /**
+   * Constructor for subclasses that add transport-specific handshake metadata, such as QUIC
+   * transport parameters. Prefer [get] for ordinary TLS handshakes.
+   */
+  protected constructor(
+    tlsVersion: TlsVersion,
+    cipherSuite: CipherSuite,
+    peerCertificates: List<Certificate>,
+    localCertificates: List<Certificate>,
+  ) : this(
+    tlsVersion = tlsVersion,
+    cipherSuite = cipherSuite,
+    localCertificates = localCertificates.toImmutableList(),
+    peerCertificatesFn = {
+      peerCertificates.toImmutableList()
+    },
+  )
+
   /** Returns a possibly-empty list of certificates that identify the remote peer. */
   @get:JvmName("peerCertificates")
   val peerCertificates: List<Certificate> by lazy {
@@ -111,19 +129,31 @@ class Handshake internal constructor(
   )
   fun localPrincipal(): Principal? = localPrincipal
 
-  override fun equals(other: Any?): Boolean =
+  /**
+   * Subclasses override this to include their additional fields in [equals]. This is only called
+   * after [other] has the exact same runtime class and the base TLS fields match.
+   */
+  protected open fun equalsHandshakeExtensions(other: Handshake): Boolean = true
+
+  /** Subclasses override this to include their additional fields in [hashCode]. */
+  protected open fun handshakeExtensionsHashCode(): Int = 0
+
+  final override fun equals(other: Any?): Boolean =
     other is Handshake &&
+      other.javaClass == javaClass &&
       other.tlsVersion == tlsVersion &&
       other.cipherSuite == cipherSuite &&
       other.peerCertificates == peerCertificates &&
-      other.localCertificates == localCertificates
+      other.localCertificates == localCertificates &&
+      equalsHandshakeExtensions(other)
 
-  override fun hashCode(): Int {
+  final override fun hashCode(): Int {
     var result = 17
     result = 31 * result + tlsVersion.hashCode()
     result = 31 * result + cipherSuite.hashCode()
     result = 31 * result + peerCertificates.hashCode()
     result = 31 * result + localCertificates.hashCode()
+    result = 31 * result + handshakeExtensionsHashCode()
     return result
   }
 

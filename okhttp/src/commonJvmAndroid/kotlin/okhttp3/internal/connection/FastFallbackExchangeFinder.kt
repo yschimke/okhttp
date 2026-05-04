@@ -48,7 +48,7 @@ internal class FastFallbackExchangeFinder(
    */
   private val connectResults = taskRunner.backend.decorate(LinkedBlockingDeque<ConnectResult>())
 
-  override fun find(): RealConnection {
+  override fun find(): PooledConnection {
     var firstException: IOException? = null
     try {
       while (tcpConnectsInFlight.isNotEmpty() || routePlanner.hasNext()) {

@@ -32,6 +32,7 @@ import okhttp3.internal.closeQuietly
 import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.concurrent.withLock
 import okhttp3.internal.connection.RoutePlanner.Plan
+import okhttp3.internal.http3.Http3Decision
 import okhttp3.internal.platform.Platform
 import okhttp3.internal.toHostHeader
 
@@ -79,7 +80,57 @@ class RealRoutePlanner internal constructor(
     val pooled2 = planReusePooledConnection(connect, connect.routes)
     if (pooled2 != null) return pooled2
 
+    // If HTTP/3 is viable for this origin and the current network hasn't already
+    // recorded a failure against this UDP peer, hand the route to the Http3Engine.
+    // Queue the matching TCP plan as deferred so the exchange finder races them
+    // (FastFallback: 250ms stagger between H/3 and TCP on the same peer;
+    // Sequential: TCP runs if H/3 fails, via the deferred-plans path).
+    //
+    // On H/3 failure the plan evicts the Alt-Svc advertisement and marks the route
+    // in the (network-scoped) RouteDatabase, so even without a deferred TCP plan the
+    // next plan() call would fall through to TCP. The deferred-queue racing is a
+    // latency optimisation; the postponement-based fallback is the correctness
+    // backstop.
+    val engine = call.client.http3Engine
+    if (engine != null && !routeDatabase.shouldPostpone(connect.route)) {
+      val decision = Http3Decision.decide(call.client, call.originalRequest, address)
+      if (decision is Http3Decision.Decision.Attempt) {
+        val h3Route = applyPortOverride(connect.route, decision.portOverride)
+        val h3Plan =
+          Http3ConnectPlan(
+            taskRunner = taskRunner,
+            connectionPool = connectionPool,
+            engine = engine,
+            call = call,
+            route = h3Route,
+            connectionListener = connectionPool.connectionListener,
+          )
+        deferredPlans.addLast(connect)
+        return h3Plan
+      }
+    }
+
     return connect
+  }
+
+  /**
+   * Rewrite [route]'s UDP peer port if discovery pointed at a non-default port.
+   * Keeps the original address + proxy + IP, swapping only the port portion of the
+   * socket address. Returns the input unchanged when [portOverride] is null or equal
+   * to the existing port.
+   */
+  private fun applyPortOverride(
+    route: Route,
+    portOverride: Int?,
+  ): Route {
+    if (portOverride == null || portOverride == route.socketAddress.port) return route
+    val currentAddress = route.socketAddress.address
+      ?: return route // Unresolved hostname — let the engine handle it as-is.
+    return Route(
+      address = route.address,
+      proxy = route.proxy,
+      socketAddress = java.net.InetSocketAddress(currentAddress, portOverride),
+    )
   }
 
   /**
@@ -294,7 +345,7 @@ class RealRoutePlanner internal constructor(
     return authenticatedRequest ?: proxyConnectRequest
   }
 
-  override fun hasNext(failedConnection: RealConnection?): Boolean {
+  override fun hasNext(failedConnection: PooledConnection?): Boolean {
     if (deferredPlans.isNotEmpty()) {
       return true
     }
@@ -303,7 +354,11 @@ class RealRoutePlanner internal constructor(
       return true
     }
 
-    if (failedConnection != null) {
+    // Route retry only applies to TCP-backed connections: H/2's REFUSED_STREAM and
+    // spec-fallback semantics drive this. QUIC doesn't have an equivalent, so H/3
+    // failures skip the retry-the-same-route optimisation and fall through to picking
+    // a fresh route entirely.
+    if (failedConnection is RealConnection) {
       val retryRoute = retryRoute(failedConnection)
       if (retryRoute != null) {
         // Lock in the route because retryRoute() is racy and we don't want to call it twice.

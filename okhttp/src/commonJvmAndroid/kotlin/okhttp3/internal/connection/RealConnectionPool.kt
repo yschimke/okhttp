@@ -50,10 +50,14 @@ class RealConnectionPool internal constructor(
 
   /**
    * Holding the lock of the connection being added or removed when mutating this, and check its
-   * [RealConnection.noNewExchanges] property. This defends against races where a connection is
+   * [PooledConnection.noNewExchanges] property. This defends against races where a connection is
    * simultaneously adopted and removed.
+   *
+   * Typed as [PooledConnection] so both TCP-backed [RealConnection] and QUIC-backed
+   * [Http3RealConnection] share a single pool — they're polymorphic through the
+   * supertype. See [PooledConnection] for the invariants all pool entries must preserve.
    */
-  private val connections = ConcurrentLinkedQueue<RealConnection>()
+  private val connections = ConcurrentLinkedQueue<PooledConnection>()
 
   init {
     // Put a floor on the keep alive duration, otherwise cleanup will spin loop.
@@ -85,7 +89,7 @@ class RealConnectionPool internal constructor(
     call: RealCall,
     routes: List<Route>?,
     requireMultiplexed: Boolean,
-  ): RealConnection? {
+  ): PooledConnection? {
     for (connection in connections) {
       // In the first synchronized block, acquire the connection if it can satisfy this call.
       val acquired =
@@ -129,7 +133,7 @@ class RealConnectionPool internal constructor(
     return null
   }
 
-  fun put(connection: RealConnection) {
+  fun put(connection: PooledConnection) {
     connection.assertLockHeld()
 
     connections.add(connection)
@@ -141,7 +145,7 @@ class RealConnectionPool internal constructor(
    * Notify this pool that [connection] has become idle. Returns true if the connection has been
    * removed from the pool and should be closed.
    */
-  fun connectionBecameIdle(connection: RealConnection): Boolean {
+  fun connectionBecameIdle(connection: PooledConnection): Boolean {
     connection.assertLockHeld()
 
     return if (connection.noNewExchanges || maxIdleConnections == 0) {
@@ -198,9 +202,9 @@ class RealConnectionPool internal constructor(
     // Also count the evictable connections to find out if we must close an EVICTABLE connection
     // before its keepAliveDurationNs is reached.
     var earliestOldIdleAtNs = (now - keepAliveDurationNs) + 1
-    var earliestOldConnection: RealConnection? = null
+    var earliestOldConnection: PooledConnection? = null
     var earliestEvictableIdleAtNs = Long.MAX_VALUE
-    var earliestEvictableConnection: RealConnection? = null
+    var earliestEvictableConnection: PooledConnection? = null
     var inUseConnectionCount = 0
     var evictableConnectionCount = 0
     for (connection in connections) {
@@ -226,7 +230,7 @@ class RealConnectionPool internal constructor(
       }
     }
 
-    val toEvict: RealConnection?
+    val toEvict: PooledConnection?
     val toEvictIdleAtNs: Long
     when {
       // We had at least one OLD connection. Close the oldest one.
@@ -287,7 +291,7 @@ class RealConnectionPool internal constructor(
    * them. Leak detection is imprecise and relies on garbage collection.
    */
   private fun pruneAndGetAllocationCount(
-    connection: RealConnection,
+    connection: PooledConnection,
     now: Long,
   ): Int {
     connection.assertLockHeld()

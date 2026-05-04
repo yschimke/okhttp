@@ -49,8 +49,8 @@ class Exchange(
   internal var hasFailure: Boolean = false
     private set
 
-  internal val connection: RealConnection
-    get() = codec.carrier as? RealConnection ?: error("no connection for CONNECT tunnels")
+  internal val connection: PooledConnection
+    get() = codec.carrier as? PooledConnection ?: error("no connection for CONNECT tunnels")
 
   internal val isCoalescedConnection: Boolean
     get() = finder.routePlanner.address.url.host != codec.carrier.route.address.url.host

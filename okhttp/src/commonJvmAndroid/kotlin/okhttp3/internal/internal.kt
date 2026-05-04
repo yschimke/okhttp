@@ -37,7 +37,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.connection.ConnectionListener
-import okhttp3.internal.connection.RealConnection
+import okhttp3.internal.connection.PooledConnection
 
 // Exposes Kotlin-internal APIs to Java test code and code in other modules.
 
@@ -106,7 +106,7 @@ internal fun MediaType?.chooseCharset(): Pair<Charset, MediaType?> {
 
 internal fun MediaType?.charsetOrUtf8(): Charset = this?.charset() ?: Charsets.UTF_8
 
-internal val Response.connection: RealConnection
+internal val Response.connection: PooledConnection
   get() = this.exchange!!.connection
 
 internal fun OkHttpClient.Builder.taskRunnerInternal(taskRunner: TaskRunner) = this.taskRunner(taskRunner)

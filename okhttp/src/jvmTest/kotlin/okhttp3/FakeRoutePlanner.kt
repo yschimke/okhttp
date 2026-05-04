@@ -19,6 +19,7 @@ import java.io.Closeable
 import java.io.IOException
 import java.util.concurrent.LinkedBlockingDeque
 import okhttp3.internal.concurrent.TaskFaker
+import okhttp3.internal.connection.PooledConnection
 import okhttp3.internal.connection.RealConnection
 import okhttp3.internal.connection.RoutePlanner
 import okhttp3.internal.connection.RoutePlanner.ConnectResult
@@ -70,7 +71,7 @@ class FakeRoutePlanner(
     return result
   }
 
-  override fun hasNext(failedConnection: RealConnection?): Boolean =
+  override fun hasNext(failedConnection: PooledConnection?): Boolean =
     deferredPlans.isNotEmpty() || nextPlanIndex < plans.size || autoGeneratePlans
 
   override fun sameHostAndPort(url: HttpUrl): Boolean = url.host == address.url.host && url.port == address.url.port
