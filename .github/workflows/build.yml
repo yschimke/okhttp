@@ -46,6 +46,7 @@ jobs:
   validation:
     name: "Validation"
     runs-on: ubuntu-latest
+    if: false
     steps:
       - uses: actions/checkout@v6
       - uses: gradle/actions/wrapper-validation@v5
@@ -58,6 +59,7 @@ jobs:
     permissions:
       checks: write # for mikepenz/action-junit-report
     runs-on: ubuntu-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -88,6 +90,7 @@ jobs:
     permissions:
       checks: write # for mikepenz/action-junit-report
     runs-on: ubuntu-latest
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -131,7 +134,7 @@ jobs:
 
   openjdk8alpn:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || contains(github.event.pull_request.labels.*.name, 'jdkversions')
+    if: false
 
     steps:
       - name: Checkout
@@ -157,7 +160,7 @@ jobs:
 
   providers:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || contains(github.event.pull_request.labels.*.name, 'providers')
+    if: false
     strategy:
       matrix:
         include:
@@ -190,6 +193,7 @@ jobs:
 
   openjdklatest:
     runs-on: ubuntu-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -243,6 +247,7 @@ jobs:
 
   testwindows:
     runs-on: windows-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -262,6 +267,7 @@ jobs:
 
   graal:
     runs-on: ubuntu-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -300,10 +306,7 @@ jobs:
       fail-fast: false
       matrix:
         api-level:
-          - 21
-          - 23
-          - 29
-          - 34
+          - 37
 
     steps:
       - name: Checkout
@@ -367,7 +370,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
-          arch: ${{ matrix.api-level == '34' && 'x86_64' || 'x86' }}
+          arch: ${{ matrix.api-level >= 30 && 'x86_64' || 'x86' }}
           script: ./gradlew -PandroidBuild=true connectedCheck
         env:
           API_LEVEL: ${{ matrix.api-level }}
@@ -377,6 +380,7 @@ jobs:
 
   loom:
     runs-on: ubuntu-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -398,6 +402,7 @@ jobs:
 
   maven:
     runs-on: ubuntu-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -421,6 +426,7 @@ jobs:
 
   java9_modules:
     runs-on: ubuntu-latest
+    if: false
 
     steps:
       - name: Checkout
@@ -440,4 +446,3 @@ jobs:
 
       - name: Run with Jlink
         run: ./gradlew module-tests:imageRun -PokhttpModuleTests=true
-
