@@ -630,11 +630,14 @@ public class okhttp3/Handshake {
 	public final fun -deprecated_peerCertificates ()Ljava/util/List;
 	public final fun -deprecated_peerPrincipal ()Ljava/security/Principal;
 	public final fun -deprecated_tlsVersion ()Lokhttp3/TlsVersion;
+	protected fun <init> (Lokhttp3/TlsVersion;Lokhttp3/CipherSuite;Ljava/util/List;Ljava/util/List;)V
 	public final fun cipherSuite ()Lokhttp3/CipherSuite;
-	public fun equals (Ljava/lang/Object;)Z
+	public final fun equals (Ljava/lang/Object;)Z
+	protected fun equalsHandshakeExtensions (Lokhttp3/Handshake;)Z
 	public static final fun get (Ljavax/net/ssl/SSLSession;)Lokhttp3/Handshake;
 	public static final fun get (Lokhttp3/TlsVersion;Lokhttp3/CipherSuite;Ljava/util/List;Ljava/util/List;)Lokhttp3/Handshake;
-	public fun hashCode ()I
+	protected fun handshakeExtensionsHashCode ()I
+	public final fun hashCode ()I
 	public final fun localCertificates ()Ljava/util/List;
 	public final fun localPrincipal ()Ljava/security/Principal;
 	public final fun peerCertificates ()Ljava/util/List;
@@ -697,6 +700,7 @@ public final class okhttp3/Headers$Companion {
 
 public abstract interface class okhttp3/Http3Engine {
 	public abstract fun connect (Lokhttp3/OkHttpClient;Lokhttp3/Route;)Lokhttp3/Http3Session;
+	public fun isAvailable (Lokhttp3/OkHttpClient;Lokhttp3/Route;)Z
 }
 
 public abstract class okhttp3/Http3Preference {

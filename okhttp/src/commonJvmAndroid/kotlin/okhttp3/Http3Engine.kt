@@ -46,6 +46,18 @@ import java.io.IOException
  */
 fun interface Http3Engine {
   /**
+   * Returns true when this engine is ready to attempt an HTTP/3 connection for [route].
+   *
+   * Engines that initialize asynchronously can return false here so OkHttp skips HTTP/3
+   * without treating the skipped attempt as a network failure. Once initialization completes,
+   * subsequent calls can return true and route planning will begin using HTTP/3.
+   */
+  fun isAvailable(
+    client: OkHttpClient,
+    route: Route,
+  ): Boolean = true
+
+  /**
    * Open an HTTP/3 session to [route], blocking until the QUIC + H/3 handshake
    * completes successfully or throwing [IOException] on failure. OkHttp will
    * transparently fall back to the TCP path when the failure looks like "origin
