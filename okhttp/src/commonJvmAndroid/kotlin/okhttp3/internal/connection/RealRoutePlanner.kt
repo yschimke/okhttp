@@ -96,6 +96,8 @@ class RealRoutePlanner internal constructor(
       val decision = Http3Decision.decide(call.client, call.originalRequest, address)
       if (decision is Http3Decision.Decision.Attempt) {
         val h3Route = applyPortOverride(connect.route, decision.portOverride)
+        if (!engine.isAvailable(call.client, h3Route)) return connect
+
         val h3Plan =
           Http3ConnectPlan(
             taskRunner = taskRunner,
