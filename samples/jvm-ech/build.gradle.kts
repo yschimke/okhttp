@@ -14,8 +14,14 @@ repositories {
   // The DEfO Conscrypt fork (https://github.com/defo-project/conscrypt) does not publish to
   // Maven Central. Build it locally and install with
   //   ./gradlew :openjdk-uber:publishToMavenLocal
-  // then this module will pick it up. See README.md for full instructions.
+  // then this module will pick it up from mavenLocal. See README.md for full instructions.
+  //
+  // Note: declaring any repository at the project level causes Gradle (PREFER_PROJECT) to
+  // ignore settings.gradle.kts' dependencyResolutionManagement.repositories block, so the
+  // standard repos have to be re-declared here.
   mavenLocal()
+  mavenCentral()
+  google()
 }
 
 // The DEfO Conscrypt build identifies itself with `defo` in its version string. Override on
