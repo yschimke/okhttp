@@ -20,6 +20,7 @@ import java.net.InetAddress
 import java.net.UnknownHostException
 import okio.Buffer
 import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import okio.utf8Size
 
 /**
@@ -31,6 +32,15 @@ internal object DnsRecordCodec {
   const val TYPE_A = 0x0001
   const val TYPE_AAAA = 0x001c
   private const val TYPE_PTR = 0x000c
+
+  /** SVCB (RFC 9460), used here for completeness. */
+  const val TYPE_SVCB = 0x0040
+
+  /** HTTPS (RFC 9460). */
+  const val TYPE_HTTPS = 0x0041
+
+  /** SvcParamKey for `ech` (RFC 9460, ECH SvcParam). */
+  const val SVCPARAM_KEY_ECH = 5
   private val ASCII = Charsets.US_ASCII
 
   fun encodeQuery(
@@ -113,6 +123,140 @@ internal object DnsRecordCodec {
     }
 
     return result
+  }
+
+  /**
+   * Decodes the first `HTTPS` answer (RFC 9460 type 65) into its SvcPriority, target name,
+   * and parsed SvcParams. Returns `null` if the response contains no HTTPS RR.
+   */
+  @Throws(Exception::class)
+  fun decodeFirstHttpsAnswer(
+    hostname: String,
+    byteString: ByteString,
+  ): HttpsRecord? {
+    val buf = Buffer()
+    buf.write(byteString)
+    buf.readShort() // query id
+
+    val flags = buf.readShort().toInt() and 0xffff
+    require(flags shr 15 != 0) { "not a response" }
+
+    val responseCode = flags and 0xf
+    if (responseCode == NXDOMAIN) {
+      throw UnknownHostException("$hostname: NXDOMAIN")
+    } else if (responseCode == SERVFAIL) {
+      throw UnknownHostException("$hostname: SERVFAIL")
+    }
+
+    val questionCount = buf.readShort().toInt() and 0xffff
+    val answerCount = buf.readShort().toInt() and 0xffff
+    buf.readShort() // authority record count
+    buf.readShort() // additional record count
+
+    for (i in 0 until questionCount) {
+      skipName(buf) // name
+      buf.readShort() // type
+      buf.readShort() // class
+    }
+
+    for (i in 0 until answerCount) {
+      skipName(buf) // name
+
+      val type = buf.readShort().toInt() and 0xffff
+      buf.readShort() // class
+      buf.readInt() // ttl
+      val length = buf.readShort().toInt() and 0xffff
+
+      if (type == TYPE_HTTPS || type == TYPE_SVCB) {
+        val rdata = ByteArray(length)
+        buf.read(rdata)
+        return parseHttpsRdata(rdata)
+      } else {
+        buf.skip(length.toLong())
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Parses an HTTPS/SVCB record's RDATA per RFC 9460. The wire format is
+   * `priority(2) | targetName(label-encoded) | SvcParams*` where each SvcParam is
+   * `key(2) | length(2) | value(length)` in strictly ascending key order.
+   *
+   * Compression pointers MUST NOT appear in HTTPS/SVCB records, so a simple label decoder
+   * is sufficient for the target name.
+   */
+  private fun parseHttpsRdata(rdata: ByteArray): HttpsRecord {
+    val rd = Buffer().apply { write(rdata) }
+
+    val priority = rd.readShort().toInt() and 0xffff
+
+    // Decode target name (label-encoded; no compression in HTTPS/SVCB).
+    val target = StringBuilder()
+    while (true) {
+      val labelLen = rd.readByte().toInt() and 0xff
+      if (labelLen == 0) break
+      check(labelLen and 0xc0 == 0) { "compression not allowed in HTTPS RR" }
+      if (target.isNotEmpty()) target.append('.')
+      val labelBytes = ByteArray(labelLen)
+      rd.read(labelBytes)
+      target.append(String(labelBytes, ASCII))
+    }
+
+    var ech: ByteString? = null
+    val alpn = mutableListOf<String>()
+    val ipv4Hints = mutableListOf<ByteArray>()
+    val ipv6Hints = mutableListOf<ByteArray>()
+    var port: Int? = null
+
+    while (!rd.exhausted()) {
+      val key = rd.readShort().toInt() and 0xffff
+      val len = rd.readShort().toInt() and 0xffff
+      val value = ByteArray(len)
+      rd.read(value)
+
+      when (key) {
+        1 -> { // alpn
+          val ab = Buffer().apply { write(value) }
+          while (!ab.exhausted()) {
+            val pl = ab.readByte().toInt() and 0xff
+            val protoBytes = ByteArray(pl)
+            ab.read(protoBytes)
+            alpn.add(String(protoBytes, ASCII))
+          }
+        }
+        3 -> { // port
+          if (len == 2) port = (value[0].toInt() and 0xff) shl 8 or (value[1].toInt() and 0xff)
+        }
+        4 -> { // ipv4hint (n * 4 bytes)
+          var i = 0
+          while (i + 4 <= value.size) {
+            ipv4Hints.add(value.copyOfRange(i, i + 4))
+            i += 4
+          }
+        }
+        6 -> { // ipv6hint (n * 16 bytes)
+          var i = 0
+          while (i + 16 <= value.size) {
+            ipv6Hints.add(value.copyOfRange(i, i + 16))
+            i += 16
+          }
+        }
+        SVCPARAM_KEY_ECH -> ech = value.toByteString()
+        // Other keys are ignored.
+      }
+    }
+
+    return HttpsRecord(
+      priority = priority,
+      target = target.toString(),
+      alpn = alpn,
+      port = port,
+      ipv4Hints = ipv4Hints.map { InetAddress.getByAddress(it) },
+      ipv6Hints = ipv6Hints.map { InetAddress.getByAddress(it) },
+      ech = ech,
+    )
   }
 
   @Throws(EOFException::class)

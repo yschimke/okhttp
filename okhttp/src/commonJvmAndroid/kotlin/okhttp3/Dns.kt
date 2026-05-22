@@ -61,13 +61,16 @@ fun interface Dns {
 
 /**
  * A [Dns] implementation that can also return HTTPS or SVCB ECH configuration for a host.
+ *
+ * Implementations populate this in a host-specific fashion (typically by reading the `ech`
+ * SvcParam from an `HTTPS` DNS record). OkHttp's TLS platform will, if it knows how to apply
+ * ECH on the current socket library, consume the returned [EchConfig] during the handshake.
  */
-internal interface EchAware {
+interface EchAware {
   /**
    * Returns ECH configuration for [host], or null if no configuration is available.
    *
-   * The returned [EchConfig] type is platform-specific. On Android this wraps an `EchConfigList`
-   * suitable for configuring the TLS socket.
+   * The returned [EchConfig] carries the raw ECHConfigList wire bytes obtained from DNS.
    */
   fun getEchConfig(host: String): EchConfig?
 }

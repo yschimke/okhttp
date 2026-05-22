@@ -68,6 +68,46 @@ class DnsOverHttps internal constructor(
     return lookupHttps(hostname)
   }
 
+  /**
+   * Performs a single DoH `HTTPS` record (RFC 9460, type 65) query for [hostname] and returns the
+   * first answer's parsed contents. Returns `null` when the upstream resolver reports success but
+   * no HTTPS RR is present; throws [UnknownHostException] on resolver errors.
+   *
+   * The returned [HttpsRecord.ech] field, when non-null, carries the raw ECHConfigList suitable
+   * for use with a TLS provider that supports Encrypted Client Hello.
+   */
+  @Throws(UnknownHostException::class)
+  fun lookupHttpsRecord(hostname: String): HttpsRecord? {
+    val request = buildRequest(hostname, DnsRecordCodec.TYPE_HTTPS)
+    val response =
+      try {
+        client.newCall(request).execute()
+      } catch (e: IOException) {
+        throw UnknownHostException("HTTPS record lookup failed for $hostname").apply { initCause(e) }
+      }
+
+    response.use {
+      if (!response.isSuccessful) {
+        throw UnknownHostException("HTTPS record lookup failed for $hostname: ${response.code}")
+      }
+      val body = response.body
+      if (body.contentLength() > MAX_RESPONSE_SIZE) {
+        throw IOException(
+          "response size exceeds limit ($MAX_RESPONSE_SIZE bytes): ${body.contentLength()} bytes",
+        )
+      }
+      val responseBytes = body.source().readByteString()
+      return try {
+        DnsRecordCodec.decodeFirstHttpsAnswer(hostname, responseBytes)
+      } catch (e: UnknownHostException) {
+        throw e
+      } catch (e: Exception) {
+        // Malformed RR or unsupported parameter. Treat as "no HTTPS record" rather than fatal.
+        null
+      }
+    }
+  }
+
   @Throws(UnknownHostException::class)
   private fun lookupHttps(hostname: String): List<InetAddress> {
     val networkRequests =

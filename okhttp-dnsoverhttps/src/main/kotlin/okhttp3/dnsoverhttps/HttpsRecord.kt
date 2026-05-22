@@ -13,19 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package okhttp3.ech
+package okhttp3.dnsoverhttps
 
+import java.net.InetAddress
 import okio.ByteString
 
 /**
- * Configuration for Encrypted Client Hello (ECH).
+ * A decoded HTTPS resource record (RFC 9460 type 65). Carries the parameters relevant to
+ * connection establishment, including IP hints, ALPN, port, and the raw `ech` SvcParam bytes.
  *
- * This contains the parameters required for a client to encrypt its ClientHello message,
- * protecting sensitive fields such as the Server Name Indication (SNI) from passive observers.
- * These parameters are typically retrieved from DNS via HTTPS or SVCB records, and platform
- * implementations may carry additional native objects needed to configure TLS sockets.
+ * Unknown SvcParam keys are skipped.
  */
-interface EchConfig {
-  /** The serialized ECHConfigList from DNS (RFC 9460 SvcParamKey `ech`, key=5). */
-  val config: ByteString
-}
+class HttpsRecord(
+  val priority: Int,
+  val target: String,
+  val alpn: List<String>,
+  val port: Int?,
+  val ipv4Hints: List<InetAddress>,
+  val ipv6Hints: List<InetAddress>,
+  /** The raw `ech` SvcParam value (an ECHConfigList per RFC 9460 §6 / draft-ietf-tls-esni). */
+  val ech: ByteString?,
+)

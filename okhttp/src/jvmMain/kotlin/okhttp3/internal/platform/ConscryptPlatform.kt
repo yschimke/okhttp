@@ -27,6 +27,10 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.Call
 import okhttp3.Protocol
+import okhttp3.ech.EchConfig
+import okhttp3.ech.EchMode
+import okhttp3.ech.EchModeConfiguration
+import okhttp3.internal.connection.RealCall
 import org.conscrypt.Conscrypt
 import org.conscrypt.ConscryptHostnameVerifier
 
@@ -37,6 +41,18 @@ import org.conscrypt.ConscryptHostnameVerifier
  */
 class ConscryptPlatform private constructor() : Platform() {
   private val provider: Provider = Conscrypt.newProvider()
+
+  /**
+   * When linked against an ECH-enabled Conscrypt (e.g. the DEfO fork), supply a configuration
+   * that applies the `ech` SvcParam to outgoing TLS handshakes. Stock Conscrypt builds report
+   * `Unspecified` and behave as before.
+   */
+  override val echModeConfiguration: EchModeConfiguration =
+    if (ConscryptEchModeConfiguration.isSupported) {
+      ConscryptEchModeConfiguration()
+    } else {
+      EchModeConfiguration.Unspecified
+    }
 
   // See release notes https://groups.google.com/forum/#!forum/conscrypt
   // for version differences
@@ -88,9 +104,28 @@ class ConscryptPlatform private constructor() : Platform() {
       // Enable ALPN.
       val names = alpnProtocolNames(protocols)
       Conscrypt.setApplicationProtocols(sslSocket, names.toTypedArray())
+
+      // Apply ECH (only effective on an ECH-enabled Conscrypt build).
+      maybeApplyEch(call, sslSocket, hostname)
     } else {
       super.configureTlsExtensions(call, sslSocket, hostname, protocols)
     }
+  }
+
+  private fun maybeApplyEch(
+    call: Call?,
+    sslSocket: SSLSocket,
+    hostname: String?,
+  ) {
+    if (hostname == null) return
+    val realCall = call as? RealCall ?: return
+    val client = realCall.client
+    val configuration = client.echModeConfiguration
+    val echMode = realCall.tag(EchMode::class) { configuration.echMode(hostname) }
+    if (!echMode.attempt) return
+    configuration
+      .applyEch(sslSocket, echMode, hostname, client.dns)
+      ?.let { echConfig -> realCall.tag(EchConfig::class) { echConfig } }
   }
 
   override fun getSelectedProtocol(sslSocket: SSLSocket): String? =

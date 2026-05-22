@@ -22,9 +22,12 @@ import assertk.assertions.isEqualTo
 import java.net.InetAddress
 import java.net.UnknownHostException
 import kotlin.test.assertFailsWith
+import assertk.assertions.isNotNull
+import assertk.assertions.isNull
 import okhttp3.dnsoverhttps.DnsRecordCodec.TYPE_A
 import okhttp3.dnsoverhttps.DnsRecordCodec.TYPE_AAAA
 import okhttp3.dnsoverhttps.DnsRecordCodec.decodeAnswers
+import okhttp3.dnsoverhttps.DnsRecordCodec.decodeFirstHttpsAnswer
 import okio.ByteString.Companion.decodeHex
 import org.junit.jupiter.api.Test
 
@@ -89,6 +92,71 @@ class DnsRecordCodecTest {
       )
     assertThat(decoded)
       .containsExactly(InetAddress.getByName("2a03:2880:f029:11:face:b00c:0:2"))
+  }
+
+  @Test
+  fun testDecodeHttpsRecordWithEch() {
+    // A DoH response carrying one HTTPS RR for example.com with target "." and an `ech` SvcParam.
+    //
+    //   header:   id=0 flags=8180 qd=1 an=1 ns=0 ar=0
+    //   question: example.com IN HTTPS
+    //   answer:   <ptr to question name> IN HTTPS ttl=300 rdlength=17
+    //     rdata:  priority=1 target=. ech=0102030405060708090a
+    val response =
+      (
+        "000081800001000100000000" +
+          "076578616d706c6503636f6d0000410001" +
+          "c00c004100010000012c0011" +
+          "0001000005000a0102030405060708090a"
+      ).decodeHex()
+
+    val record = decodeFirstHttpsAnswer("example.com", response)
+
+    assertThat(record).isNotNull()
+    assertThat(record!!.priority).isEqualTo(1)
+    assertThat(record.target).isEqualTo("")
+    assertThat(record.ech).isEqualTo("0102030405060708090a".decodeHex())
+    assertThat(record.alpn).containsExactly()
+    assertThat(record.ipv4Hints).containsExactly()
+    assertThat(record.ipv6Hints).containsExactly()
+  }
+
+  @Test
+  fun testDecodeHttpsRecordWithAlpnAndHints() {
+    // priority=1 target=. alpn=["h3","h2"] ipv4hint=192.0.2.1 ech=cafebabe
+    //
+    // SvcParams in strictly-ascending key order: alpn(1), ipv4hint(4), ech(5).
+    //   alpn: key=0001 len=0006 value=02 'h3' 02 'h2' => 02 68 33 02 68 32
+    //   ipv4hint: key=0004 len=0004 value=c0 00 02 01
+    //   ech:  key=0005 len=0004 value=ca fe ba be
+    //
+    // RDATA total = 2 + 1 + (4+6) + (4+4) + (4+4) = 29 bytes (0x1d).
+    val response =
+      (
+        "000081800001000100000000" +
+          "076578616d706c6503636f6d0000410001" +
+          "c00c004100010000012c001d" +
+          "00010000010006026833026832000400 04c0000201000500 04cafebabe"
+      ).replace(" ", "").decodeHex()
+
+    val record = decodeFirstHttpsAnswer("example.com", response)
+
+    assertThat(record).isNotNull()
+    assertThat(record!!.alpn).containsExactly("h3", "h2")
+    assertThat(record.ipv4Hints).containsExactly(InetAddress.getByName("192.0.2.1"))
+    assertThat(record.ech).isEqualTo("cafebabe".decodeHex())
+  }
+
+  @Test
+  fun testDecodeHttpsRecordReturnsNullWhenAbsent() {
+    // A DoH response with no HTTPS answer (an A record instead).
+    val response =
+      (
+        "00008180000100010000000006676f6f676c6503636f6d0000010001c00c0001000100000043" +
+          "0004d83ad54e"
+      ).decodeHex()
+
+    assertThat(decodeFirstHttpsAnswer("google.com", response)).isNull()
   }
 
   @Test

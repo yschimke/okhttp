@@ -485,6 +485,14 @@ public abstract interface class okhttp3/Dns {
 public final class okhttp3/Dns$Companion {
 }
 
+public abstract interface class okhttp3/EchAware {
+	public abstract fun getEchConfig (Ljava/lang/String;)Lokhttp3/ech/EchConfig;
+}
+
+public abstract interface class okhttp3/ech/EchConfig {
+	public abstract fun getConfig ()Lokio/ByteString;
+}
+
 public abstract class okhttp3/EventListener {
 	public static final field Companion Lokhttp3/EventListener$Companion;
 	public static final field NONE Lokhttp3/EventListener;

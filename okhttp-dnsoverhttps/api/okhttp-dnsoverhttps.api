@@ -4,10 +4,28 @@ public final class okhttp3/dnsoverhttps/DnsOverHttps : okhttp3/Dns {
 	public final fun client ()Lokhttp3/OkHttpClient;
 	public final fun includeIPv6 ()Z
 	public fun lookup (Ljava/lang/String;)Ljava/util/List;
+	public final fun lookupHttpsRecord (Ljava/lang/String;)Lokhttp3/dnsoverhttps/HttpsRecord;
 	public final fun post ()Z
 	public final fun resolvePrivateAddresses ()Z
 	public final fun resolvePublicAddresses ()Z
 	public final fun url ()Lokhttp3/HttpUrl;
+}
+
+public final class okhttp3/dnsoverhttps/EchAwareDnsOverHttps : okhttp3/Dns, okhttp3/EchAware {
+	public fun <init> (Lokhttp3/dnsoverhttps/DnsOverHttps;)V
+	public fun getEchConfig (Ljava/lang/String;)Lokhttp3/ech/EchConfig;
+	public fun lookup (Ljava/lang/String;)Ljava/util/List;
+}
+
+public final class okhttp3/dnsoverhttps/HttpsRecord {
+	public fun <init> (ILjava/lang/String;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/util/List;Lokio/ByteString;)V
+	public final fun getAlpn ()Ljava/util/List;
+	public final fun getEch ()Lokio/ByteString;
+	public final fun getIpv4Hints ()Ljava/util/List;
+	public final fun getIpv6Hints ()Ljava/util/List;
+	public final fun getPort ()Ljava/lang/Integer;
+	public final fun getPriority ()I
+	public final fun getTarget ()Ljava/lang/String;
 }
 
 public final class okhttp3/dnsoverhttps/DnsOverHttps$Builder {
