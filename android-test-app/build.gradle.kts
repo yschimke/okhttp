@@ -1,14 +1,15 @@
 @file:Suppress("UnstableApiUsage")
 
+import okhttp3.buildsupport.testJavaVersion
+
+
 plugins {
   id("okhttp.base-conventions")
   id("com.android.application")
 }
 
 android {
-  compileSdk {
-    version = release(37)
-  }
+  compileSdk = 36
 
   namespace = "okhttp.android.testapp"
 
@@ -17,7 +18,7 @@ android {
 
   defaultConfig {
     minSdk = 21
-    targetSdk = 37
+    targetSdk = 36
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

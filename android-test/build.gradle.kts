@@ -8,9 +8,7 @@ plugins {
 }
 
 android {
-  compileSdk {
-    version = release(37)
-  }
+  compileSdk = 36
 
   namespace = "okhttp.android.test"
 
@@ -26,15 +24,25 @@ android {
     )
   }
 
+  if (androidBuild) {
+    sourceSets["androidTest"].java.srcDirs(
+      "../okhttp-brotli/src/test/java",
+      "../okhttp-dnsoverhttps/src/test/java",
+      "../okhttp-logging-interceptor/src/test/java",
+      "../okhttp-sse/src/test/java"
+    )
+  }
+
   compileOptions {
     targetCompatibility(JavaVersion.VERSION_11)
     sourceCompatibility(JavaVersion.VERSION_11)
   }
 
   testOptions {
-    targetSdk = 37
+    targetSdk = 34
     unitTests.isIncludeAndroidResources = true
   }
+
 
   // issue merging due to conflict with httpclient and something else
   packagingOptions.resources.excludes += setOf(
@@ -47,25 +55,11 @@ android {
   )
 }
 
-if (androidBuild) {
-  androidComponents {
-    onVariants(selector().all()) { variant ->
-      variant.androidTest?.sources?.java?.apply {
-        addStaticSourceDirectory("../okhttp-brotli/src/test/java")
-        addStaticSourceDirectory("../okhttp-dnsoverhttps/src/test/java")
-        addStaticSourceDirectory("../okhttp-logging-interceptor/src/test/java")
-        addStaticSourceDirectory("../okhttp-sse/src/test/java")
-      }
-    }
-  }
-}
-
 dependencies {
   implementation(libs.kotlin.reflect)
   implementation(libs.playservices.safetynet)
   "friendsImplementation"(projects.okhttp)
   "friendsImplementation"(projects.okhttpDnsoverhttps)
-  implementation(libs.androidx.activity)
 
   testImplementation(projects.okhttp)
   testImplementation(libs.junit)
@@ -119,9 +113,4 @@ junitPlatform {
   filters {
     excludeTags("Remote")
   }
-}
-
-tasks.withType<Test> {
-  // Fix for robolectric https://github.com/robolectric/robolectric/pull/10996
-  jvmArgs("--add-opens", "java.base/jdk.internal.access=ALL-UNNAMED")
 }
