@@ -16,31 +16,32 @@ Two pieces are required:
    normal `A`/`AAAA` lookups.
 2. **A TLS provider that exposes an "apply ECH config list to the socket" hook.** No stock JVM
    TLS provider does this (as of May 2026) — see the feasibility note on the parent branch — so
-   the sample uses the DEfO fork of Google's Conscrypt. `ConscryptEchModeConfiguration` (in
-   this module, not in okhttp) calls `org.conscrypt.Conscrypt.setEchConfigList(...)` directly.
+   the sample uses the **DEfO / Guardian Project's** ECH-enabled Conscrypt build.
+   `ConscryptEchModeConfiguration` (in this module, not in okhttp) calls
+   `org.conscrypt.Conscrypt.setEchConfigList(...)` directly.
 
 Because the call is direct, **linking this module against stock Conscrypt is a compile-time
 error**. That's the intended guard — there is no silent ECH-strip path.
 
-## Building DEfO Conscrypt locally
+## Dependency
 
-The DEfO fork is not on Maven Central. Build it once and install into your local Maven cache:
-
-```bash
-git clone https://github.com/defo-project/conscrypt
-cd conscrypt
-# DEfO Conscrypt builds against the DEfO BoringSSL fork; follow their BUILDING.md
-# (BoringSSL/CMake/Ninja prerequisites).
-./gradlew :openjdk-uber:publishToMavenLocal
-```
-
-Note the resulting version string (e.g. `2.5.3-defo`) and pass it to this sample:
+The Guardian Project (the same people behind DEfO) publishes the ECH-enabled Conscrypt fork to
+Maven Central as `info.guardianproject.conscrypt:conscrypt-openjdk`. The sample uses it
+directly, so **no local build is required** for x86_64 Linux:
 
 ```bash
 ./gradlew :samples:jvm-ech:run \
-  -PdefoConscryptVersion=2.5.3-defo \
   --args="https://crypto.cloudflare.com/cdn-cgi/trace"
 ```
+
+Only the `linux-x86_64` classifier is published. On other architectures (Apple Silicon, etc.)
+either:
+- Override the classifier: `-PguardianConscryptClassifier=...` (no other published variants
+  exist today, so this is mostly a hook for future builds);
+- Or build the DEfO Conscrypt fork yourself from
+  https://github.com/defo-project/conscrypt and install with
+  `./gradlew :openjdk-uber:publishToMavenLocal`. You'd then add `mavenLocal()` to this
+  module's `repositories { }`.
 
 When the sample reports `sni=encrypted` in the response body, ECH was actually negotiated.
 

@@ -10,30 +10,24 @@ application {
   mainClass.set("okhttp3.sample.ech.JvmEchKt")
 }
 
-repositories {
-  // The DEfO Conscrypt fork (https://github.com/defo-project/conscrypt) does not publish to
-  // Maven Central. Build it locally and install with
-  //   ./gradlew :openjdk-uber:publishToMavenLocal
-  // then this module will pick it up from mavenLocal. See README.md for full instructions.
-  //
-  // Note: declaring any repository at the project level causes Gradle (PREFER_PROJECT) to
-  // ignore settings.gradle.kts' dependencyResolutionManagement.repositories block, so the
-  // standard repos have to be re-declared here.
-  mavenLocal()
-  mavenCentral()
-  google()
-}
-
-// The DEfO Conscrypt build identifies itself with `defo` in its version string. Override on
-// the command line, e.g. `-PdefoConscryptVersion=2.5.3-defo`, to point at your local build.
-val defoConscryptVersion = (findProperty("defoConscryptVersion") as String?) ?: "2.5.3-defo"
+// The DEfO/Guardian Project's ECH-enabled Conscrypt is published on Maven Central as
+// `info.guardianproject.conscrypt:conscrypt-openjdk`. The artifact is platform-specific —
+// only the `linux-x86_64` classifier is published, so this sample currently builds and runs
+// only on Linux x86_64 (which is what CI uses). On other platforms, build the fork locally.
+val guardianConscryptVersion =
+  (findProperty("guardianConscryptVersion") as String?) ?: "2.6.alpha1647601986.job2220801545"
+val guardianConscryptClassifier =
+  (findProperty("guardianConscryptClassifier") as String?) ?: "linux-x86_64"
 
 dependencies {
   implementation(projects.okhttp)
   implementation(projects.okhttpDnsoverhttps)
 
-  // Compile-time dependency on the DEfO Conscrypt fork. ConscryptEchModeConfiguration calls
-  // Conscrypt.setEchConfigList(...) directly and won't compile against stock Conscrypt — by
-  // design, so we cannot silently ship an ECH-stripped build.
-  implementation("org.conscrypt:conscrypt-openjdk-uber:$defoConscryptVersion")
+  // Compile-time dependency on the Guardian Project's ECH-enabled Conscrypt build.
+  // ConscryptEchModeConfiguration calls Conscrypt.setEchConfigList(...) directly and won't
+  // compile against stock Conscrypt — by design, so we can't silently ship an ECH-stripped
+  // build.
+  implementation(
+    "info.guardianproject.conscrypt:conscrypt-openjdk:$guardianConscryptVersion:$guardianConscryptClassifier",
+  )
 }
