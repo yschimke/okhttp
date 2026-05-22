@@ -274,7 +274,12 @@ open class OkHttpClient internal constructor(
       builder.connectionPool = it
     }
 
-  internal val echModeConfiguration: EchModeConfiguration = builder.echModeConfiguration
+  /**
+   * Returns the [EchModeConfiguration] used by this client. Defaults to the platform-supplied
+   * configuration, which is `EchModeConfiguration.Unspecified` on JVM (i.e. no ECH).
+   */
+  @get:JvmName("echModeConfiguration")
+  val echModeConfiguration: EchModeConfiguration = builder.echModeConfiguration
 
   constructor() : this(Builder())
 
@@ -832,6 +837,21 @@ open class OkHttpClient internal constructor(
           this.routeDatabase = null
         }
         this.dns = dns
+      }
+
+    /**
+     * Sets the [EchModeConfiguration] used to apply Encrypted Client Hello (ECH) to TLS
+     * connections.
+     *
+     * If unset, the active [Platform] supplies a default — `EchModeConfiguration.Unspecified`
+     * on JVM, and an Android-native configuration when running on API 37+. Set explicitly to
+     * a value such as a Conscrypt-backed configuration to enable ECH on JVM. The supplied
+     * [okhttp3.Dns] should also implement [okhttp3.EchAware] so the configuration can read the
+     * per-host ECHConfigList obtained from DNS.
+     */
+    fun echModeConfiguration(echModeConfiguration: EchModeConfiguration) =
+      apply {
+        this.echModeConfiguration = echModeConfiguration
       }
 
     /**

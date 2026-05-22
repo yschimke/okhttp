@@ -25,23 +25,21 @@ import org.conscrypt.Conscrypt
  *
  * Cloudflare's `crypto.cloudflare.com` reflects whether the request was made with ECH.
  *
- * Steps performed:
+ * Steps:
  *   1. Install ECH-enabled Conscrypt as the first JSSE provider.
- *   2. Build a DoH client and wrap it with [EchAwareDnsOverHttps] so that the `ech` SvcParam
- *      from the HTTPS DNS record is surfaced via [okhttp3.EchAware].
- *   3. Issue the user-supplied request; OkHttp's `ConscryptPlatform.echModeConfiguration` will
- *      reflectively apply the ECH config list to the TLS socket if Conscrypt supports it.
+ *   2. Build a DoH client and wrap it with [EchAwareDnsOverHttps] so the `ech` SvcParam from
+ *      the RFC 9460 HTTPS DNS record is surfaced via [okhttp3.EchAware].
+ *   3. Wire a [ConscryptEchModeConfiguration] onto the OkHttpClient. There is no reflection:
+ *      this module links directly against the DEfO Conscrypt API at compile time.
  */
 fun main(args: Array<String>) {
   val targetUrl = (args.firstOrNull() ?: "https://crypto.cloudflare.com/cdn-cgi/trace").toHttpUrl()
 
-  // 1. Install Conscrypt at the top of the provider list. The DEfO fork uses the same
-  //    `Conscrypt.newProvider()` entry point as upstream so this code is identical.
+  // 1. Install Conscrypt at the top of the provider list.
   Security.insertProviderAt(Conscrypt.newProvider(), 1)
   println("Conscrypt version: ${Conscrypt.version()}")
-  println("ECH-enabled Conscrypt: ${hasEchApi()}")
 
-  // 2. DoH bootstrap client (no DNS-of-DNS dependency). Cloudflare's 1.1.1.1 is used here.
+  // 2. ECH-aware DoH bootstrap. Cloudflare's 1.1.1.1 resolver is used.
   val bootstrap = OkHttpClient()
   val doh =
     DnsOverHttps
@@ -53,19 +51,20 @@ fun main(args: Array<String>) {
       .build()
   val echAwareDns = EchAwareDnsOverHttps(doh)
 
-  // 3. Real client that uses the ECH-aware Dns. The platform-supplied EchModeConfiguration
-  //    (ConscryptEchModeConfiguration when Conscrypt is the active platform) wires the
-  //    EchConfig from DNS into the TLS handshake.
+  // 3. Real client. The ECH config is supplied by `echAwareDns` (via EchAware) and applied
+  //    by `ConscryptEchModeConfiguration` during the TLS handshake.
+  val echConfig = ConscryptEchModeConfiguration()
   val client =
     OkHttpClient
       .Builder()
       .dns(echAwareDns)
+      .echModeConfiguration(echConfig)
       .build()
 
-  // Force DNS to run so getEchConfig is populated before the connection.
+  // Force DNS so EchAware is populated before we report.
   val addresses = echAwareDns.lookup(targetUrl.host)
   println("Resolved ${targetUrl.host}: $addresses")
-  println("ECH config available from DNS: ${echAwareDns.getEchConfig(targetUrl.host) != null}")
+  println("ECH config from DNS: ${echAwareDns.getEchConfig(targetUrl.host) != null}")
 
   client.newCall(Request.Builder().url(targetUrl).build()).execute().use { response ->
     println("HTTP ${response.code} ${response.message}")
@@ -74,21 +73,6 @@ fun main(args: Array<String>) {
     println(body)
     println("--- end ---")
     // crypto.cloudflare.com reflects `sni=encrypted` for ECH-protected handshakes.
-    val protectedByEch = body.contains("sni=encrypted")
-    println("SNI was encrypted: $protectedByEch")
+    println("SNI was encrypted: ${"sni=encrypted" in body}")
   }
 }
-
-private fun hasEchApi(): Boolean =
-  try {
-    Class
-      .forName("org.conscrypt.Conscrypt")
-      .getMethod(
-        "setEchConfigList",
-        javax.net.ssl.SSLSocket::class.java,
-        ByteArray::class.java,
-      )
-    true
-  } catch (_: ReflectiveOperationException) {
-    false
-  }

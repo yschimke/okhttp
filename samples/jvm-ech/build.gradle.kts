@@ -12,7 +12,8 @@ application {
 
 repositories {
   // The DEfO Conscrypt fork (https://github.com/defo-project/conscrypt) does not publish to
-  // Maven Central. Build it locally and install with `./gradlew :openjdk-uber:publishToMavenLocal`,
+  // Maven Central. Build it locally and install with
+  //   ./gradlew :openjdk-uber:publishToMavenLocal
   // then this module will pick it up. See README.md for full instructions.
   mavenLocal()
 }
@@ -25,8 +26,8 @@ dependencies {
   implementation(projects.okhttp)
   implementation(projects.okhttpDnsoverhttps)
 
-  // Resolved from mavenLocal() when the local DEfO build is installed. If absent the project
-  // will fail to resolve; in that case run with `-PdefoConscryptVersion=2.5.3` to use stock
-  // Conscrypt (ECH then degrades to standard TLS — useful for testing the no-ECH path).
+  // Compile-time dependency on the DEfO Conscrypt fork. ConscryptEchModeConfiguration calls
+  // Conscrypt.setEchConfigList(...) directly and won't compile against stock Conscrypt — by
+  // design, so we cannot silently ship an ECH-stripped build.
   implementation("org.conscrypt:conscrypt-openjdk-uber:$defoConscryptVersion")
 }

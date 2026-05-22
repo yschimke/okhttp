@@ -29,7 +29,6 @@ import okhttp3.Call
 import okhttp3.Protocol
 import okhttp3.ech.EchConfig
 import okhttp3.ech.EchMode
-import okhttp3.ech.EchModeConfiguration
 import okhttp3.internal.connection.RealCall
 import org.conscrypt.Conscrypt
 import org.conscrypt.ConscryptHostnameVerifier
@@ -41,18 +40,6 @@ import org.conscrypt.ConscryptHostnameVerifier
  */
 class ConscryptPlatform private constructor() : Platform() {
   private val provider: Provider = Conscrypt.newProvider()
-
-  /**
-   * When linked against an ECH-enabled Conscrypt (e.g. the DEfO fork), supply a configuration
-   * that applies the `ech` SvcParam to outgoing TLS handshakes. Stock Conscrypt builds report
-   * `Unspecified` and behave as before.
-   */
-  override val echModeConfiguration: EchModeConfiguration =
-    if (ConscryptEchModeConfiguration.isSupported) {
-      ConscryptEchModeConfiguration()
-    } else {
-      EchModeConfiguration.Unspecified
-    }
 
   // See release notes https://groups.google.com/forum/#!forum/conscrypt
   // for version differences

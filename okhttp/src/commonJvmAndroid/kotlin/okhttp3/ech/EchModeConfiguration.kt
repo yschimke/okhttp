@@ -25,7 +25,7 @@ import okhttp3.Dns
  * This interface provides the mechanism to determine the ECH strategy for a given host,
  * apply ECH parameters to an [SSLSocket], and identify ECH-specific connection failures.
  */
-internal interface EchModeConfiguration {
+interface EchModeConfiguration {
   /**
    * Determines the [EchMode] strategy to be used for the specified [host].
    *
@@ -65,7 +65,8 @@ internal interface EchModeConfiguration {
      * A default implementation of [EchModeConfiguration] that performs no ECH-related actions
      * and always returns [EchMode.Unspecified].
      */
-    val Unspecified =
+    @JvmField
+    val Unspecified: EchModeConfiguration =
       object : EchModeConfiguration {
         override fun echMode(host: String): EchMode = EchMode.Unspecified
 
