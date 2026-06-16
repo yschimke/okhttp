@@ -31,8 +31,10 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import okhttp3.AsyncDns
 import okhttp3.Call
 import okhttp3.Dns
+import okhttp3.ExperimentalOkHttpApi
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.ech.EchModeConfiguration
@@ -210,6 +212,14 @@ open class Platform {
   }
 
   open fun platformDns(): Dns = Dns.SYSTEM
+
+  /**
+   * Returns a platform-specific [AsyncDns] capable of resolving HTTPS/SVCB records (including ECH
+   * configuration), or null if the platform has no such resolver. Used as the default
+   * [OkHttpClient.asyncDns].
+   */
+  @OptIn(ExperimentalOkHttpApi::class)
+  internal open fun platformAsyncDns(): AsyncDns? = null
 
   override fun toString(): String = javaClass.simpleName
 

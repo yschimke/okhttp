@@ -29,9 +29,12 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
+import okhttp3.AsyncDns
 import okhttp3.Call
 import okhttp3.Dns
+import okhttp3.ExperimentalOkHttpApi
 import okhttp3.Protocol
+import okhttp3.android.AndroidAsyncDns
 import okhttp3.ech.EchModeConfiguration
 import okhttp3.internal.SuppressSignatureCheck
 import okhttp3.internal.platform.AndroidPlatform.Companion.Tag
@@ -125,6 +128,10 @@ class Android17Platform
 
     @SuppressLint("NewApi")
     override fun platformDns(): Dns = AndroidDnsResolverDns()
+
+    @OptIn(ExperimentalOkHttpApi::class)
+    @SuppressLint("NewApi")
+    override fun platformAsyncDns(): AsyncDns = AndroidAsyncDns()
 
     companion object {
       val isSupported: Boolean = (isAndroid && Build.VERSION.SDK_INT >= 37)

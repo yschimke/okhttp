@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+@file:OptIn(ExperimentalOkHttpApi::class)
+
 package okhttp3
 
 import java.net.Proxy
@@ -183,6 +185,14 @@ open class OkHttpClient internal constructor(
 
   @get:JvmName("dns")
   val dns: Dns = builder.dns
+
+  /**
+   * The asynchronous DNS resolver, or null to resolve with [dns] only. When set, the connection
+   * path can use HTTPS/SVCB records it returns (including Encrypted Client Hello configuration).
+   */
+  @get:JvmName("asyncDns")
+  @ExperimentalOkHttpApi
+  val asyncDns: AsyncDns? = builder.asyncDns
 
   @get:JvmName("proxy")
   val proxy: Proxy? = builder.proxy
@@ -601,6 +611,7 @@ open class OkHttpClient internal constructor(
     internal var cookieJar: CookieJar = CookieJar.NO_COOKIES
     internal var cache: Cache? = null
     internal var dns: Dns = Platform.get().platformDns()
+    internal var asyncDns: AsyncDns? = Platform.get().platformAsyncDns()
     internal var proxy: Proxy? = null
     internal var proxySelector: ProxySelector? = null
     internal var proxyAuthenticator: Authenticator = Authenticator.NONE
@@ -637,6 +648,7 @@ open class OkHttpClient internal constructor(
       this.cookieJar = okHttpClient.cookieJar
       this.cache = okHttpClient.cache
       this.dns = okHttpClient.dns
+      this.asyncDns = okHttpClient.asyncDns
       this.proxy = okHttpClient.proxy
       this.proxySelector = okHttpClient.proxySelector
       this.proxyAuthenticator = okHttpClient.proxyAuthenticator
@@ -832,6 +844,21 @@ open class OkHttpClient internal constructor(
           this.routeDatabase = null
         }
         this.dns = dns
+      }
+
+    /**
+     * Sets the asynchronous DNS resolver, which may return HTTPS/SVCB records (including Encrypted
+     * Client Hello configuration) in addition to addresses. Pass null to resolve with [dns] only.
+     *
+     * If unset, a platform-specific resolver is used when available (for example on Android 17+).
+     */
+    @ExperimentalOkHttpApi
+    fun asyncDns(asyncDns: AsyncDns?) =
+      apply {
+        if (asyncDns != this.asyncDns) {
+          this.routeDatabase = null
+        }
+        this.asyncDns = asyncDns
       }
 
     /**
