@@ -312,6 +312,11 @@ jobs:
           - api-level: 34
             arch: x86_64
             target: default
+          # API 37 only ships 16 KB page-size images; playstore_ps16k resolves to
+          # google_apis_playstore_ps16k. Quoted so YAML keeps the ".0".
+          - api-level: "37.0"
+            arch: x86_64
+            target: playstore_ps16k
 
     steps:
       - name: Checkout
@@ -396,92 +401,6 @@ jobs:
 
       - name: Build Release App
         run: ./gradlew android-test-app:lint android-test-app:assembleRelease
-
-  android37:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Configure JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: 21
-
-      - name: Enable KVM group perms
-        # https://github.blog/changelog/2023-02-23-hardware-accelerated-android-virtualization-on-actions-windows-and-linux-larger-hosted-runners/
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Verify KVM
-        run: |
-          sudo apt-get install -y cpu-checker
-          kvm-ok || echo "KVM is not accelerated"
-          kvm-ok || exit 1
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: Gradle cache
-        run: ./gradlew :android-test:test
-
-      - name: Run Android 37 Tests
-        run: |
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' | sort | tail -n 1)"
-          AVDMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/avdmanager' | sort | tail -n 1)"
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          EMULATOR="$ANDROID_HOME/emulator/emulator"
-          export ANDROID_AVD_HOME="$HOME/.android/avd"
-          mkdir -p "$ANDROID_AVD_HOME"
-
-          yes | "$SDKMANAGER" --licenses > /dev/null
-          "$SDKMANAGER" --install \
-            'build-tools;36.0.0' \
-            platform-tools \
-            'platforms;android-37.0' \
-            emulator \
-            'system-images;android-37.0;google_apis_playstore_ps16k;x86_64' \
-            --channel=0 > /dev/null
-
-          printf 'no\n' | "$AVDMANAGER" create avd \
-            --force \
-            --name test \
-            --package 'system-images;android-37.0;google_apis_playstore_ps16k;x86_64'
-
-          "$AVDMANAGER" list avd
-
-          "$EMULATOR" \
-            -port 5554 \
-            -avd test \
-            -no-window \
-            -gpu swiftshader_indirect \
-            -no-snapshot \
-            -noaudio \
-            -no-boot-anim \
-            -camera-back none \
-            -memory 4096 &
-
-          "$ADB" -s emulator-5554 wait-for-device
-          timeout 1200 bash -c 'until [[ "$("$1" -s emulator-5554 shell getprop sys.boot_completed | tr -d "\r")" == "1" ]]; do sleep 2; done' -- "$ADB"
-          timeout 300 bash -c 'until "$1" -s emulator-5554 shell service check input | grep -q "found"; do sleep 2; done' -- "$ADB"
-          timeout 300 bash -c 'until "$1" -s emulator-5554 shell service check package | grep -q "found"; do sleep 2; done' -- "$ADB"
-          timeout 300 bash -c 'until "$1" -s emulator-5554 shell service check activity | grep -q "found"; do sleep 2; done' -- "$ADB"
-          "$ADB" -s emulator-5554 shell getprop ro.build.version.sdk
-          "$ADB" -s emulator-5554 shell getprop ro.build.version.release
-
-          ./gradlew -PandroidBuild=true connectedCheck
-        env:
-          API_LEVEL: 37.0
-
-      - name: Stop Android 37 Emulator
-        if: always()
-        run: |
-          "$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true
 
   loom:
     runs-on: ubuntu-latest
