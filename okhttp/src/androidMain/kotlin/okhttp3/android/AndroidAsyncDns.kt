@@ -41,6 +41,7 @@ import okio.ByteString.Companion.toByteString
  *
  * Available on Android 16 (API 36) and newer; ECH application additionally requires API 37.
  */
+@Suppress("NewApi")
 @RequiresApi(36)
 @ExperimentalOkHttpApi
 @SuppressSignatureCheck
