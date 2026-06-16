@@ -145,14 +145,14 @@ class RetryAndFollowUpInterceptor : Interceptor {
       val echModeConfiguration = call.client.echModeConfiguration
       val echMode = echModeConfiguration.echMode(call.request().url.host)
       if (
-        call.tag(EchMode::class) != EchMode.Fallback &&
+        call.echMode != EchMode.Fallback &&
         echMode.fallback &&
         echModeConfiguration.isEchConfigError(e)
       ) {
         // Mark this call so the next connection attempt skips ECH. Without this guard a fallback
         // connection that also fails with an ECH-classified SSLException could retry indefinitely.
         Platform.get().log("Should retry here with ECH disabled")
-        call.tag(EchMode::class) { EchMode.Fallback }
+        call.echMode = EchMode.Fallback
       }
     }
 

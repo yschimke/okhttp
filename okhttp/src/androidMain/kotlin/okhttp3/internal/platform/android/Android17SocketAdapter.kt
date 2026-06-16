@@ -23,8 +23,6 @@ import androidx.annotation.RequiresApi
 import javax.net.ssl.SSLSocket
 import okhttp3.Call
 import okhttp3.Protocol
-import okhttp3.ech.EchConfig
-import okhttp3.ech.EchMode
 import okhttp3.internal.SuppressSignatureCheck
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.platform.Android17Platform
@@ -74,21 +72,17 @@ class Android17SocketAdapter
       sslSocket.sslParameters = sslParameters
 
       if (hostname != null) {
-        val client = (call as? RealCall)?.client ?: return
+        val realCall = call as? RealCall ?: return
+        val client = realCall.client
 
         val echModeConfiguration = client.echModeConfiguration
 
         val echMode =
-          call.tag(EchMode::class) {
-            echModeConfiguration.echMode(hostname)
-          }
+          realCall.echMode
+            ?: echModeConfiguration.echMode(hostname).also { realCall.echMode = it }
 
         if (echMode.attempt) {
-          echModeConfiguration
-            .applyEch(sslSocket, echMode, hostname, client.dns)
-            ?.let { echConfig ->
-              call.tag(EchConfig::class) { echConfig }
-            }
+          realCall.echConfig = echModeConfiguration.applyEch(sslSocket, echMode, hostname, client.dns)
         }
       }
     }

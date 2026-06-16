@@ -33,7 +33,6 @@ import okhttp3.Handshake.Companion.handshake
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Route
-import okhttp3.ech.EchConfig
 import okhttp3.internal.closeQuietly
 import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.concurrent.withLock
@@ -387,7 +386,7 @@ class ConnectPlan internal constructor(
           tlsVersion = unverifiedHandshake.tlsVersion,
           cipherSuite = unverifiedHandshake.cipherSuite,
           localCertificates = unverifiedHandshake.localCertificates,
-          echConfig = call.tag(EchConfig::class),
+          echConfig = call.echConfig,
         ) {
           certificatePinner.certificateChainCleaner!!.clean(
             unverifiedHandshake.peerCertificates,
