@@ -23,10 +23,10 @@ import androidx.annotation.RequiresApi
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
 import okhttp3.Dns
-import okhttp3.EchAware
 import okhttp3.ech.EchConfig
 import okhttp3.ech.EchMode
 import okhttp3.ech.EchModeConfiguration
+import okhttp3.internal.EchAware
 import okhttp3.internal.platform.AndroidEchConfig
 import okio.IOException
 

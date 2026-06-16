@@ -46,10 +46,6 @@ import okhttp3.internal.platform.Platform.Companion.isAndroid
 class Android17SocketAdapter
   @RequiresApi(36)
   internal constructor() : SocketAdapter {
-    init {
-      println("AndroidCanarySocketAdapter")
-    }
-
     override fun matchesSocket(sslSocket: SSLSocket): Boolean = SSLSockets.isSupportedSocket(sslSocket)
 
     override fun isSupported(): Boolean = Companion.isSupported()

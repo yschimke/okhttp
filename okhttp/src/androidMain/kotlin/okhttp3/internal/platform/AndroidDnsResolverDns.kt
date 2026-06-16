@@ -28,11 +28,14 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.TimeUnit.SECONDS
 import java.util.concurrent.TimeoutException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import okhttp3.Dns
-import okhttp3.EchAware
 import okhttp3.ech.EchConfig
+import okhttp3.internal.EchAware
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 
@@ -82,7 +85,7 @@ internal class AndroidDnsResolver(
       DnsResolver(PlatformRegistry.applicationContext!!, handlerThread.looper)
     },
   private val executor: Executor = Executor { it.run() },
-  private val timeoutSeconds: Long = 5L,
+  private val timeout: Duration = 5.seconds,
 ) : AndroidDnsLookup {
   override fun lookup(hostname: String): AndroidDnsResult {
     val endpoint = queryHttps(hostname)
@@ -128,7 +131,7 @@ internal class AndroidDnsResolver(
     )
 
     return try {
-      result.get(timeoutSeconds, SECONDS)
+      result.get(timeout.inWholeMilliseconds, MILLISECONDS)
     } catch (e: ExecutionException) {
       throw (e.cause as? DnsResolver.DnsException)?.toUnknownHostException(hostname)
         ?: UnknownHostException("Broken system behaviour for dns lookup of $hostname").apply {

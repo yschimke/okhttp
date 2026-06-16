@@ -55,7 +55,7 @@ class AndroidDnsResolverDnsTest {
     dns.lookup("example.com")
     assertThat(dns.getEchConfig("example.com")).isEqualTo(echConfig)
 
-    lookup["example.com"] = AndroidDnsResult(listOf(address), null)
+    lookup.responses["example.com"] = AndroidDnsResult(listOf(address), null)
     dns.lookup("example.com")
     assertThat(dns.getEchConfig("example.com")).isNull()
   }
@@ -72,14 +72,7 @@ class AndroidDnsResolverDnsTest {
   private class FakeDnsLookup(
     vararg responses: Pair<String, AndroidDnsResult>,
   ) : AndroidDnsLookup {
-    private val responses = responses.toMap().toMutableMap()
-
-    operator fun set(
-      hostname: String,
-      result: AndroidDnsResult,
-    ) {
-      responses[hostname] = result
-    }
+    val responses = responses.toMap().toMutableMap()
 
     override fun lookup(hostname: String): AndroidDnsResult = responses[hostname] ?: throw UnknownHostException(hostname)
   }

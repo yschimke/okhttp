@@ -120,8 +120,3 @@ junitPlatform {
     excludeTags("Remote")
   }
 }
-
-tasks.withType<Test> {
-  // Fix for robolectric https://github.com/robolectric/robolectric/pull/10996
-  jvmArgs("--add-opens", "java.base/jdk.internal.access=ALL-UNNAMED")
-}
