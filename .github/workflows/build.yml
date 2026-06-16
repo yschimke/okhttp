@@ -436,7 +436,9 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 37.0
-          target: google_apis_playstore
+          # API 37 only ships 16 KB page-size (_ps16k) images; there is no plain
+          # google_apis_playstore image for this level.
+          target: google_apis_playstore_ps16k
           arch: x86_64
           emulator-boot-timeout: 1200
           script: ./gradlew -PandroidBuild=true connectedCheck
