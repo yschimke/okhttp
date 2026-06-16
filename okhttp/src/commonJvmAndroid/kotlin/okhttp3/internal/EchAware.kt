@@ -24,7 +24,7 @@ import okhttp3.ech.EchConfig
  * This lives in the `internal` package because Java ignores Kotlin `internal` visibility; the
  * `okhttp3.internal` package signals that this is not a stable public API.
  */
-interface EchAware {
+internal interface EchAware {
   /**
    * Returns ECH configuration for [host], or null if no configuration is available.
    *
