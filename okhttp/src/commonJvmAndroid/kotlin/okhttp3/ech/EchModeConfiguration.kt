@@ -18,6 +18,7 @@ package okhttp3.ech
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
 import okhttp3.Dns
+import okhttp3.ExperimentalOkHttpApi
 
 /**
  * Configuration and management for Encrypted Client Hello (ECH).
@@ -25,7 +26,8 @@ import okhttp3.Dns
  * This interface provides the mechanism to determine the ECH strategy for a given host,
  * apply ECH parameters to an [SSLSocket], and identify ECH-specific connection failures.
  */
-internal interface EchModeConfiguration {
+@ExperimentalOkHttpApi
+interface EchModeConfiguration {
   /**
    * Determines the [EchMode] strategy to be used for the specified [host].
    *

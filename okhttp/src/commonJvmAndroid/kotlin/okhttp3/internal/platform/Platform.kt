@@ -14,6 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+@file:OptIn(okhttp3.ExperimentalOkHttpApi::class)
+
 package okhttp3.internal.platform
 
 import java.io.IOException
