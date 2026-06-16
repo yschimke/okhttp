@@ -29,8 +29,7 @@ import okio.IOException
  * Typical implementations are backed by Android's `DnsResolver`, OkHttp's DnsOverHttps, or other
  * resolver libraries. Implementations must be safe for concurrent use.
  */
-@ExperimentalOkHttpApi
-fun interface AsyncDns {
+internal fun interface AsyncDns {
   /**
    * Returns a new, cold [DnsCall] for [hostname]. No work is performed until the call is enqueued.
    *
@@ -44,7 +43,6 @@ fun interface AsyncDns {
   ): DnsCall
 
   /** A single in-flight DNS resolution. */
-  @ExperimentalOkHttpApi
   interface DnsCall {
     /** The host name being resolved. */
     val hostname: String
@@ -60,7 +58,6 @@ fun interface AsyncDns {
   }
 
   /** Receives the results of a [DnsCall]. */
-  @ExperimentalOkHttpApi
   interface DnsCallback {
     /**
      * A batch of [results]. When [hasMore] is true further batches will arrive for this call (for
@@ -83,7 +80,6 @@ fun interface AsyncDns {
     )
   }
 
-  @ExperimentalOkHttpApi
   companion object {
     /**
      * Adapts this [AsyncDns] to the blocking [Dns] interface. Only [DnsResult.Address] values are

@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-@file:OptIn(ExperimentalOkHttpApi::class)
-
 package okhttp3.android
 
 import android.annotation.SuppressLint
@@ -29,7 +27,6 @@ import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.AsyncDns
 import okhttp3.DnsResult
-import okhttp3.ExperimentalOkHttpApi
 import okhttp3.internal.SuppressSignatureCheck
 import okhttp3.internal.platform.PlatformRegistry
 import okio.ByteString.Companion.toByteString
@@ -46,9 +43,8 @@ import okio.ByteString.Companion.toByteString
  */
 @Suppress("NewApi")
 @RequiresApi(36)
-@ExperimentalOkHttpApi
 @SuppressSignatureCheck
-class AndroidAsyncDns
+internal class AndroidAsyncDns
   @RequiresApi(36)
   internal constructor(
     private val dnsResolver: DnsResolver =

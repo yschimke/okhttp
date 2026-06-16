@@ -21,14 +21,12 @@ import java.util.concurrent.CountDownLatch
 import okhttp3.AsyncDns
 import okhttp3.Dns
 import okhttp3.DnsResult
-import okhttp3.ExperimentalOkHttpApi
 import okio.IOException
 
 /**
  * Adapts an [AsyncDns] to the blocking [Dns] interface, waiting for the final result batch and
  * returning its addresses. HTTPS/SVCB metadata is not representable in [Dns] and is discarded.
  */
-@OptIn(ExperimentalOkHttpApi::class)
 internal class BlockingAsyncDns(
   private val asyncDns: AsyncDns,
 ) : Dns {

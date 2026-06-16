@@ -14,8 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-@file:OptIn(okhttp3.ExperimentalOkHttpApi::class)
-
 package okhttp3.internal.platform
 
 import java.io.IOException
@@ -36,7 +34,6 @@ import javax.net.ssl.X509TrustManager
 import okhttp3.AsyncDns
 import okhttp3.Call
 import okhttp3.Dns
-import okhttp3.ExperimentalOkHttpApi
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.ech.EchModeConfiguration
@@ -220,7 +217,6 @@ open class Platform {
    * configuration), or null if the platform has no such resolver. Used as the default
    * [OkHttpClient.asyncDns].
    */
-  @OptIn(ExperimentalOkHttpApi::class)
   internal open fun platformAsyncDns(): AsyncDns? = null
 
   override fun toString(): String = javaClass.simpleName

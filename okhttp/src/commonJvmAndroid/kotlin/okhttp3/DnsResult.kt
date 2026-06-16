@@ -28,10 +28,8 @@ import okio.ByteString
  * This is intentional: connection metadata such as Encrypted Client Hello (ECH) must not be lost
  * when a resolver is wrapped.
  */
-@ExperimentalOkHttpApi
-sealed interface DnsResult {
+internal sealed interface DnsResult {
   /** A resolved IP address from an `A` or `AAAA` record. This is the authoritative address source. */
-  @ExperimentalOkHttpApi
   class Address(
     val address: InetAddress,
   ) : DnsResult
@@ -44,7 +42,6 @@ sealed interface DnsResult {
    * Address hints ([ipv4Hints]/[ipv6Hints]) are an optimization only; `A`/`AAAA` records remain
    * the authoritative address source (RFC 9460 §7.3).
    */
-  @ExperimentalOkHttpApi
   class HttpsService(
     /** The serialized ECHConfigList for this endpoint, or null if the record carries no ECH. */
     val ech: ByteString? = null,

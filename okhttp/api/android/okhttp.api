@@ -27,26 +27,6 @@ public final class okhttp3/Address {
 	public final fun url ()Lokhttp3/HttpUrl;
 }
 
-public abstract interface class okhttp3/AsyncDns {
-	public static final field Companion Lokhttp3/AsyncDns$Companion;
-	public abstract fun newCall (Ljava/lang/String;Z)Lokhttp3/AsyncDns$DnsCall;
-}
-
-public final class okhttp3/AsyncDns$Companion {
-	public final fun asBlocking (Lokhttp3/AsyncDns;)Lokhttp3/Dns;
-}
-
-public abstract interface class okhttp3/AsyncDns$DnsCall {
-	public abstract fun cancel ()V
-	public abstract fun enqueue (Lokhttp3/AsyncDns$DnsCallback;)V
-	public abstract fun getHostname ()Ljava/lang/String;
-}
-
-public abstract interface class okhttp3/AsyncDns$DnsCallback {
-	public abstract fun onFailure (Lokhttp3/AsyncDns$DnsCall;Ljava/io/IOException;Z)V
-	public abstract fun onResults (Lokhttp3/AsyncDns$DnsCall;Ljava/util/List;Z)V
-}
-
 public abstract interface class okhttp3/Authenticator {
 	public static final field Companion Lokhttp3/Authenticator$Companion;
 	public static final field JAVA_NET_AUTHENTICATOR Lokhttp3/Authenticator;
@@ -505,27 +485,6 @@ public abstract interface class okhttp3/Dns {
 public final class okhttp3/Dns$Companion {
 }
 
-public abstract interface class okhttp3/DnsResult {
-}
-
-public final class okhttp3/DnsResult$Address : okhttp3/DnsResult {
-	public fun <init> (Ljava/net/InetAddress;)V
-	public final fun getAddress ()Ljava/net/InetAddress;
-}
-
-public final class okhttp3/DnsResult$HttpsService : okhttp3/DnsResult {
-	public fun <init> ()V
-	public fun <init> (Lokio/ByteString;ILjava/lang/String;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/util/List;)V
-	public synthetic fun <init> (Lokio/ByteString;ILjava/lang/String;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun getAlpn ()Ljava/util/List;
-	public final fun getEch ()Lokio/ByteString;
-	public final fun getIpv4Hints ()Ljava/util/List;
-	public final fun getIpv6Hints ()Ljava/util/List;
-	public final fun getPort ()Ljava/lang/Integer;
-	public final fun getSvcPriority ()I
-	public final fun getTargetName ()Ljava/lang/String;
-}
-
 public abstract class okhttp3/EventListener {
 	public static final field Companion Lokhttp3/EventListener$Companion;
 	public static final field NONE Lokhttp3/EventListener;
@@ -571,9 +530,6 @@ public final class okhttp3/EventListener$Companion {
 
 public abstract interface class okhttp3/EventListener$Factory {
 	public abstract fun create (Lokhttp3/Call;)Lokhttp3/EventListener;
-}
-
-public abstract interface annotation class okhttp3/ExperimentalOkHttpApi : java/lang/annotation/Annotation {
 }
 
 public final class okhttp3/FormBody : okhttp3/RequestBody {
@@ -969,7 +925,6 @@ public class okhttp3/OkHttpClient : okhttp3/Call$Factory, okhttp3/WebSocket$Fact
 	public final fun -deprecated_writeTimeoutMillis ()I
 	public fun <init> ()V
 	public final fun address (Lokhttp3/HttpUrl;)Lokhttp3/Address;
-	public final fun asyncDns ()Lokhttp3/AsyncDns;
 	public final fun authenticator ()Lokhttp3/Authenticator;
 	public final fun cache ()Lokhttp3/Cache;
 	public final fun callTimeoutMillis ()I
@@ -1012,7 +967,6 @@ public final class okhttp3/OkHttpClient$Builder {
 	public fun <init> ()V
 	public final fun addInterceptor (Lokhttp3/Interceptor;)Lokhttp3/OkHttpClient$Builder;
 	public final fun addNetworkInterceptor (Lokhttp3/Interceptor;)Lokhttp3/OkHttpClient$Builder;
-	public final fun asyncDns (Lokhttp3/AsyncDns;)Lokhttp3/OkHttpClient$Builder;
 	public final fun authenticator (Lokhttp3/Authenticator;)Lokhttp3/OkHttpClient$Builder;
 	public final fun build ()Lokhttp3/OkHttpClient;
 	public final fun cache (Lokhttp3/Cache;)Lokhttp3/OkHttpClient$Builder;
@@ -1356,44 +1310,5 @@ public abstract class okhttp3/WebSocketListener {
 	public fun onMessage (Lokhttp3/WebSocket;Ljava/lang/String;)V
 	public fun onMessage (Lokhttp3/WebSocket;Lokio/ByteString;)V
 	public fun onOpen (Lokhttp3/WebSocket;Lokhttp3/Response;)V
-}
-
-public final class okhttp3/android/AndroidAsyncDns : okhttp3/AsyncDns {
-	public fun <init> ()V
-	public fun newCall (Ljava/lang/String;Z)Lokhttp3/AsyncDns$DnsCall;
-}
-
-public abstract interface class okhttp3/ech/EchConfig {
-	public abstract fun getConfig ()Lokio/ByteString;
-}
-
-public final class okhttp3/ech/EchMode : java/lang/Enum {
-	public static final field Companion Lokhttp3/ech/EchMode$Companion;
-	public static final field Disabled Lokhttp3/ech/EchMode;
-	public static final field FailClosed Lokhttp3/ech/EchMode;
-	public static final field Fallback Lokhttp3/ech/EchMode;
-	public static final field Opportunistic Lokhttp3/ech/EchMode;
-	public static final field Strict Lokhttp3/ech/EchMode;
-	public static final field Unspecified Lokhttp3/ech/EchMode;
-	public final fun getAttempt ()Z
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public final fun getFallback ()Z
-	public final fun getRequire ()Z
-	public static fun valueOf (Ljava/lang/String;)Lokhttp3/ech/EchMode;
-	public static fun values ()[Lokhttp3/ech/EchMode;
-}
-
-public final class okhttp3/ech/EchMode$Companion {
-}
-
-public abstract interface class okhttp3/ech/EchModeConfiguration {
-	public static final field Companion Lokhttp3/ech/EchModeConfiguration$Companion;
-	public abstract fun applyEch (Ljavax/net/ssl/SSLSocket;Lokhttp3/ech/EchMode;Ljava/lang/String;Lokhttp3/Dns;)Lokhttp3/ech/EchConfig;
-	public abstract fun echMode (Ljava/lang/String;)Lokhttp3/ech/EchMode;
-	public fun isEchConfigError (Ljavax/net/ssl/SSLException;)Z
-}
-
-public final class okhttp3/ech/EchModeConfiguration$Companion {
-	public final fun getUnspecified ()Lokhttp3/ech/EchModeConfiguration;
 }
 

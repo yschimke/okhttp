@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-@file:OptIn(okhttp3.ExperimentalOkHttpApi::class)
-
 package okhttp3.internal.platform
 
 import android.annotation.SuppressLint
@@ -34,7 +32,6 @@ import javax.net.ssl.X509TrustManager
 import okhttp3.AsyncDns
 import okhttp3.Call
 import okhttp3.Dns
-import okhttp3.ExperimentalOkHttpApi
 import okhttp3.Protocol
 import okhttp3.android.AndroidAsyncDns
 import okhttp3.ech.EchModeConfiguration
@@ -131,7 +128,6 @@ class Android17Platform
     @SuppressLint("NewApi")
     override fun platformDns(): Dns = AndroidDnsResolverDns()
 
-    @OptIn(ExperimentalOkHttpApi::class)
     @SuppressLint("NewApi")
     override fun platformAsyncDns(): AsyncDns = AndroidAsyncDns()
 

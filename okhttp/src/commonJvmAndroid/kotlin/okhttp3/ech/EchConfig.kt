@@ -15,7 +15,6 @@
  */
 package okhttp3.ech
 
-import okhttp3.ExperimentalOkHttpApi
 import okio.ByteString
 
 /**
@@ -26,8 +25,7 @@ import okio.ByteString
  * These parameters are typically retrieved from DNS via HTTPS or SVCB records, and platform
  * implementations may carry additional native objects needed to configure TLS sockets.
  */
-@ExperimentalOkHttpApi
-interface EchConfig {
+internal interface EchConfig {
   /** The serialized ECH configuration list from DNS. */
   val config: ByteString
 }
