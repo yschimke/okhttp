@@ -23,8 +23,10 @@ import android.net.dns.HttpsEndpoint
 import android.os.CancellationSignal
 import android.os.HandlerThread
 import androidx.annotation.RequiresApi
+import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.AsyncDns
 import okhttp3.DnsResult
 import okhttp3.ExperimentalOkHttpApi
@@ -35,9 +37,10 @@ import okio.ByteString.Companion.toByteString
 /**
  * An [AsyncDns] backed by Android's [DnsResolver].
  *
- * A single HTTPS/SVCB (type 65) query resolves both the host's IP addresses and any HTTPS service
- * records, so Encrypted Client Hello (ECH) configuration arrives alongside the addresses in one
- * [DnsResult] batch rather than through a side channel.
+ * A single resolution issues three independent queries: `A` and `AAAA` for the host's authoritative
+ * IP addresses, and an HTTPS/SVCB (type 65) query for the service record carrying Encrypted Client
+ * Hello (ECH) configuration. Each query's answer is delivered as its own [DnsResult] batch; the last
+ * one to complete is reported with `hasMore = false`.
  *
  * Available on Android 16 (API 36) and newer; ECH application additionally requires API 37.
  */
@@ -56,15 +59,66 @@ class AndroidAsyncDns
     private val executor: Executor = Executor { it.run() },
     private val timeoutMillis: Int = 5_000,
   ) : AsyncDns {
-    override fun newCall(hostname: String): AsyncDns.DnsCall = AndroidDnsCall(hostname)
+    override fun newCall(
+      hostname: String,
+      addressesOnly: Boolean,
+    ): AsyncDns.DnsCall = AndroidDnsCall(hostname, addressesOnly)
 
     private inner class AndroidDnsCall(
       override val hostname: String,
+      private val addressesOnly: Boolean,
     ) : AsyncDns.DnsCall {
       private val cancellationSignal = CancellationSignal()
 
-      @SuppressLint("NewApi")
       override fun enqueue(callback: AsyncDns.DnsCallback) {
+        // A, AAAA and (unless addresses-only) HTTPS resolve independently; the last to finish
+        // reports hasMore = false.
+        val remaining = AtomicInteger(if (addressesOnly) 2 else 3)
+        queryAddresses(DnsResolver.TYPE_A, callback, remaining)
+        queryAddresses(DnsResolver.TYPE_AAAA, callback, remaining)
+        if (!addressesOnly) queryHttps(callback, remaining)
+      }
+
+      override fun cancel() {
+        cancellationSignal.cancel()
+      }
+
+      private fun queryAddresses(
+        type: Int,
+        callback: AsyncDns.DnsCallback,
+        remaining: AtomicInteger,
+      ) {
+        val call = this
+        try {
+          dnsResolver.query(
+            null,
+            hostname,
+            type,
+            DnsResolver.FLAG_EMPTY,
+            executor,
+            cancellationSignal,
+            object : DnsResolver.Callback<List<InetAddress>> {
+              override fun onAnswer(
+                answer: List<InetAddress>,
+                rcode: Int,
+              ) {
+                callback.onResults(call, answer.map { DnsResult.Address(it) }, remaining.last())
+              }
+
+              override fun onError(e: DnsResolver.DnsException) {
+                callback.onFailure(call, e.toUnknownHostException(hostname), remaining.last())
+              }
+            },
+          )
+        } catch (e: Exception) {
+          callback.onFailure(call, hostname.toUnknownHostException(e), remaining.last())
+        }
+      }
+
+      private fun queryHttps(
+        callback: AsyncDns.DnsCallback,
+        remaining: AtomicInteger,
+      ) {
         val call = this
         try {
           @Suppress("WrongConstant")
@@ -80,38 +134,28 @@ class AndroidAsyncDns
                 answer: HttpsEndpoint,
                 rcode: Int,
               ) {
-                callback.onResults(call, answer.toDnsResults(), hasMore = false)
+                callback.onResults(call, answer.toHttpsServices(), remaining.last())
               }
 
               override fun onError(e: DnsResolver.DnsException) {
-                callback.onFailure(call, e.toUnknownHostException(hostname), hasMore = false)
+                // ECH is best-effort; a missing/failed HTTPS record is not a lookup failure.
+                callback.onResults(call, listOf(), remaining.last())
               }
             },
           )
         } catch (e: Exception) {
-          // DnsResolver can throw synchronously for malformed/absent parameters.
-          // https://issuetracker.google.com/issues/319957694
-          callback.onFailure(
-            call,
-            UnknownHostException("DNS lookup failed for $hostname").apply { initCause(e) },
-            hasMore = false,
-          )
+          callback.onResults(call, listOf(), remaining.last())
         }
-      }
-
-      override fun cancel() {
-        cancellationSignal.cancel()
       }
     }
   }
 
+/** Decrements the outstanding-query counter and returns whether further batches will follow. */
+private fun AtomicInteger.last(): Boolean = decrementAndGet() > 0
+
 @SuppressLint("NewApi")
-private fun HttpsEndpoint.toDnsResults(): List<DnsResult> {
-  val results = ArrayList<DnsResult>(ipAddresses.size + httpsRecords.size)
-  for (address in ipAddresses) {
-    results += DnsResult.Address(address)
-  }
-  for (record in httpsRecords) {
+private fun HttpsEndpoint.toHttpsServices(): List<DnsResult.HttpsService> =
+  httpsRecords.map { record ->
     val ech =
       try {
         record.echConfigList?.toBytes()?.toByteString()
@@ -120,13 +164,16 @@ private fun HttpsEndpoint.toDnsResults(): List<DnsResult> {
         // https://issuetracker.google.com/issues/319957694
         null
       }
-    results += DnsResult.HttpsService(ech = ech)
+    DnsResult.HttpsService(ech = ech)
   }
-  return results
-}
 
 @SuppressLint("NewApi")
 private fun DnsResolver.DnsException.toUnknownHostException(hostname: String): UnknownHostException =
   UnknownHostException("DNS lookup failed for $hostname").apply {
     initCause(this@toUnknownHostException)
+  }
+
+private fun String.toUnknownHostException(cause: Throwable): UnknownHostException =
+  UnknownHostException("DNS lookup failed for $this").apply {
+    initCause(cause)
   }

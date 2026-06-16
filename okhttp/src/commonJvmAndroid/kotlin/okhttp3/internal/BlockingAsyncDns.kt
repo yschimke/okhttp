@@ -37,7 +37,8 @@ internal class BlockingAsyncDns(
     val failures = mutableListOf<IOException>()
     val latch = CountDownLatch(1)
 
-    asyncDns.newCall(hostname).enqueue(
+    // Dns can only carry addresses, so skip the HTTPS/SVCB query.
+    asyncDns.newCall(hostname, addressesOnly = true).enqueue(
       object : AsyncDns.DnsCallback {
         override fun onResults(
           call: AsyncDns.DnsCall,

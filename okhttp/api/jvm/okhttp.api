@@ -29,7 +29,7 @@ public final class okhttp3/Address {
 
 public abstract interface class okhttp3/AsyncDns {
 	public static final field Companion Lokhttp3/AsyncDns$Companion;
-	public abstract fun newCall (Ljava/lang/String;)Lokhttp3/AsyncDns$DnsCall;
+	public abstract fun newCall (Ljava/lang/String;Z)Lokhttp3/AsyncDns$DnsCall;
 }
 
 public final class okhttp3/AsyncDns$Companion {

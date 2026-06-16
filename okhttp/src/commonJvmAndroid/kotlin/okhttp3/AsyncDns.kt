@@ -33,8 +33,15 @@ import okio.IOException
 fun interface AsyncDns {
   /**
    * Returns a new, cold [DnsCall] for [hostname]. No work is performed until the call is enqueued.
+   *
+   * When [addressesOnly] is true the caller needs only IP addresses, so the resolver may skip
+   * HTTPS/SVCB queries (and the ECH configuration they carry). Resolvers that ignore this flag and
+   * always return everything are still correct.
    */
-  fun newCall(hostname: String): DnsCall
+  fun newCall(
+    hostname: String,
+    addressesOnly: Boolean,
+  ): DnsCall
 
   /** A single in-flight DNS resolution. */
   @ExperimentalOkHttpApi
