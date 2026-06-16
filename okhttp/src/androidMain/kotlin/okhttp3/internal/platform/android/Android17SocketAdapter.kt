@@ -82,7 +82,8 @@ class Android17SocketAdapter
             ?: echModeConfiguration.echMode(hostname).also { realCall.echMode = it }
 
         if (echMode.attempt) {
-          realCall.echConfig = echModeConfiguration.applyEch(sslSocket, echMode, hostname, client.dns)
+          // echConfig was resolved during DNS (RealCall.resolveAddresses); just apply it here.
+          echModeConfiguration.applyEch(sslSocket, echMode, hostname, realCall.echConfig)
         }
       }
     }

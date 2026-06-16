@@ -16,26 +16,26 @@
 package okhttp3.internal.platform.android
 
 import android.annotation.SuppressLint
+import android.net.ssl.EchConfigList
 import android.net.ssl.EchConfigMismatchException
+import android.net.ssl.InvalidEchDataException
 import android.net.ssl.SSLSockets
 import android.security.NetworkSecurityPolicy
 import androidx.annotation.RequiresApi
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
-import okhttp3.Dns
 import okhttp3.ech.EchConfig
 import okhttp3.ech.EchMode
 import okhttp3.ech.EchModeConfiguration
-import okhttp3.internal.EchAware
-import okhttp3.internal.platform.AndroidEchConfig
 import okio.IOException
 
 /**
  * Android implementation of [EchModeConfiguration] for API 37+.
  *
  * This bridges OkHttp's platform-neutral ECH policy to Android's native ECH APIs:
- * [NetworkSecurityPolicy] supplies the per-host domain encryption policy, [Dns] may provide an
- * HTTPS/SVCB ECH configuration list, and [SSLSockets] applies that configuration to the TLS socket.
+ * [NetworkSecurityPolicy] supplies the per-host domain encryption policy, the resolved
+ * [EchConfig] carries the HTTPS/SVCB ECH configuration list, and [SSLSockets] applies it to the
+ * TLS socket.
  */
 @RequiresApi(37)
 internal class AndroidEchModeConfiguration : EchModeConfiguration {
@@ -53,22 +53,22 @@ internal class AndroidEchModeConfiguration : EchModeConfiguration {
     sslSocket: SSLSocket,
     echMode: EchMode,
     host: String,
-    dns: Dns,
-  ): EchConfig? {
-    // The Android DNS implementation returns AndroidEchConfig instances. Other Dns
-    // implementations are valid; they simply won't be able to configure Android ECH sockets.
-    val echConfig = (dns as? EchAware)?.getEchConfig(host) as? AndroidEchConfig
+    echConfig: EchConfig?,
+  ) {
+    val echConfigList =
+      echConfig?.let {
+        try {
+          EchConfigList.fromBytes(it.config.toByteArray())
+        } catch (e: InvalidEchDataException) {
+          null
+        }
+      }
 
-    if (echConfig != null) {
-      SSLSockets.setEchConfigList(
-        sslSocket,
-        echConfig.echConfigList,
-      )
-      return echConfig
+    if (echConfigList != null) {
+      SSLSockets.setEchConfigList(sslSocket, echConfigList)
     } else if (echMode.require) {
       throw IOException("Unable to apply required ECH config for $host")
     }
-    return null
   }
 }
 

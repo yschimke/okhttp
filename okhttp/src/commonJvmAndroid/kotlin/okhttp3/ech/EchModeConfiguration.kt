@@ -17,7 +17,6 @@ package okhttp3.ech
 
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
-import okhttp3.Dns
 
 /**
  * Configuration and management for Encrypted Client Hello (ECH).
@@ -35,18 +34,15 @@ internal interface EchModeConfiguration {
   fun echMode(host: String): EchMode
 
   /**
-   * Configures [sslSocket] with Encrypted Client Hello (ECH) parameters for [host].
-   *
-   * Implementations may use [dns] to retrieve ECH configuration records. If [echMode] requires
-   * ECH and no configuration can be applied, this should throw an [java.io.IOException]. Returns
-   * the configuration that was applied, or null when no ECH configuration was used.
+   * Configures [sslSocket] with the already-resolved [echConfig] for [host]. If [echMode] requires
+   * ECH and [echConfig] is null (or can't be applied), this throws an [java.io.IOException].
    */
   fun applyEch(
     sslSocket: SSLSocket,
     echMode: EchMode,
     host: String,
-    dns: Dns,
-  ): EchConfig?
+    echConfig: EchConfig?,
+  )
 
   /**
    * Returns true if [e] indicates a failure due to an invalid or expired ECH configuration.
@@ -73,10 +69,9 @@ internal interface EchModeConfiguration {
           sslSocket: SSLSocket,
           echMode: EchMode,
           host: String,
-          dns: Dns,
-        ): EchConfig? {
+          echConfig: EchConfig?,
+        ) {
           check(!echMode.attempt)
-          return null
         }
       }
   }
