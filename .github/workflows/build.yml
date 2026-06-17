@@ -303,15 +303,19 @@ jobs:
           - api-level: 21
             arch: x86
             target: default
+            gpu: "-gpu swiftshader_indirect"
           - api-level: 23
             arch: x86
             target: default
+            gpu: "-gpu swiftshader_indirect"
           - api-level: 29
             arch: x86
             target: default
+            gpu: "-gpu swiftshader_indirect"
           - api-level: 34
             arch: x86_64
             target: default
+            gpu: "-gpu swiftshader_indirect"
           # API 37 only ships 16 KB page-size images; playstore_ps16k resolves to
           # google_apis_playstore_ps16k. Quoted so YAML keeps the ".0".
           - api-level: "37.0"
@@ -319,6 +323,8 @@ jobs:
             target: playstore_ps16k
             # API 37 needs more headroom than the other levels.
             memory: 3072
+            # Try API 37 without forcing swiftshader.
+            gpu: ""
 
     steps:
       - name: Checkout
@@ -372,7 +378,7 @@ jobs:
           # No window, no audio, and use swiftshader for headless environments
           emulator-options: >
             -no-window
-            -gpu swiftshader_indirect
+            ${{ matrix.gpu }}
             -noaudio
             -no-boot-anim
             -camera-back none
@@ -392,7 +398,7 @@ jobs:
           # includes -no-snapshot, which would otherwise force a slow cold boot.
           emulator-options: >
             -no-window
-            -gpu swiftshader_indirect
+            ${{ matrix.gpu }}
             -noaudio
             -no-boot-anim
             -camera-back none
