@@ -322,7 +322,7 @@ jobs:
             arch: x86_64
             target: playstore_ps16k
             # API 37 needs more headroom than the other levels.
-            memory: 3072
+            memory: 4096
             # Try API 37 without forcing swiftshader.
             gpu: ""
 
