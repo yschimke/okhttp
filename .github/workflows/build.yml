@@ -317,6 +317,8 @@ jobs:
           - api-level: "37.0"
             arch: x86_64
             target: playstore_ps16k
+            # API 37 needs more headroom than the other levels.
+            memory: 3072
 
     steps:
       - name: Checkout
@@ -374,7 +376,7 @@ jobs:
             -noaudio
             -no-boot-anim
             -camera-back none
-            -memory 2048
+            -memory ${{ matrix.memory || '2048' }}
           disable-animations: true
           script: echo "Generated AVD snapshot for caching."
 
@@ -394,7 +396,7 @@ jobs:
             -noaudio
             -no-boot-anim
             -camera-back none
-            -memory 2048
+            -memory ${{ matrix.memory || '2048' }}
           script: ./gradlew -PandroidBuild=true connectedCheck
         env:
           API_LEVEL: ${{ matrix.api-level }}
