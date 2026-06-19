@@ -319,6 +319,7 @@ jobs:
             target: playstore_ps16k
             # API 37 needs more headroom than the other levels.
             memory: 4096
+            gpu: -gpu auto
 
     steps:
       - name: Checkout
@@ -372,14 +373,15 @@ jobs:
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
           emulator-boot-timeout: 1200
-          # No window, no audio, and use swiftshader for headless environments
+          # No window, no audio, and use dynamic GPU and feature flags for headless environments
           emulator-options: >
             -no-window
-            -gpu swiftshader_indirect
+            ${{ matrix.gpu || '-gpu swiftshader_indirect' }}
             -noaudio
             -no-boot-anim
             -camera-back none
             -memory ${{ matrix.memory || '2048' }}
+            -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator
           disable-animations: true
           script: echo "Generated AVD snapshot for caching."
 
@@ -395,11 +397,12 @@ jobs:
           # includes -no-snapshot, which would otherwise force a slow cold boot.
           emulator-options: >
             -no-window
-            -gpu swiftshader_indirect
+            ${{ matrix.gpu || '-gpu swiftshader_indirect' }}
             -noaudio
             -no-boot-anim
             -camera-back none
             -memory ${{ matrix.memory || '2048' }}
+            -feature GLDirectMem,HasSharedSlotsHostMemoryAllocator
           script: ./gradlew -PandroidBuild=true connectedCheck
         env:
           API_LEVEL: ${{ matrix.api-level }}
