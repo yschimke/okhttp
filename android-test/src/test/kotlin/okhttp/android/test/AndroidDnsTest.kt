@@ -24,13 +24,13 @@ import assertk.assertions.containsExactly
 import assertk.assertions.hasSize
 import assertk.assertions.isEmpty
 import assertk.assertions.isEqualTo
+import assertk.assertions.isFalse
 import assertk.assertions.isInstanceOf
+import assertk.assertions.isNotEmpty
 import assertk.assertions.isNotNull
 import assertk.assertions.isTrue
 import java.io.IOException
-import java.net.InetAddress
 import java.net.UnknownHostException
-import java.util.concurrent.Executor
 import okhttp3.Dns
 import okhttp3.Protocol
 import okhttp3.android.AndroidDns
@@ -40,7 +40,6 @@ import okhttp3.dnsoverhttps.internal.ResourceRecord
 import okhttp3.internal.OkHttpInternalApi
 import okhttp3.internal.dns.execute
 import okio.Buffer
-import okio.ByteString.Companion.decodeHex
 import okio.ByteString.Companion.encodeUtf8
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,54 +48,25 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadow.api.Shadow
 
 /**
- * Drives [AndroidDns] against a shadowed [DnsResolver]. Address lookups go through the platform's
- * typed `query` API, so those are answered with [InetAddress]es directly; the `HTTPS` lookup goes
- * through `rawQuery`, so that one is answered with DNS wire bytes built by [DnsMessageWriter].
+ * Drives [AndroidDns] under Robolectric. IP addresses come from the real system resolver, so we
+ * resolve `localhost` for a deterministic, offline answer; the `HTTPS`/ECH record is fed through a
+ * shadowed [DnsResolver.rawQuery] using the same [DnsMessageWriter] the `DnsOverHttps` tests use.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], shadows = [ShadowDnsResolver::class])
 class AndroidDnsTest {
-  private val host = "example.com"
-  private val ipv4 = InetAddress.getByAddress("5db8d822".decodeHex().toByteArray())
-  private val ipv6 =
-    InetAddress.getByAddress(
-      "20010db8000000000000000000000001".decodeHex().toByteArray(),
-    )
   private val echConfigList = "this is an encrypted client hello".encodeUtf8()
 
   private val resolver = DnsResolver.getInstance()
   private val shadow = Shadow.extract<ShadowDnsResolver>(resolver)
-  private val dns = AndroidDns(dnsResolver = resolver, executor = Executor { it.run() })
 
   @Test
-  fun resolvesIpv4AndIpv6() {
-    shadow.responder = { request ->
-      when (request.nsType) {
-        DnsResolver.TYPE_A -> request.callback.onAnswer(listOf(ipv4), 0)
-        else -> request.callback.onAnswer(listOf(ipv6), 0)
-      }
-    }
-    shadow.rawResponder = { it.callback.onAnswer(response(), 0) }
-
-    val records = dns.newCall(Dns.Request(host)).execute()
-
-    assertThat(records.filterIsInstance<Dns.Record.IpAddress>().map { it.address })
-      .containsExactly(ipv4, ipv6)
-  }
-
-  @Test
-  fun httpsRecordCarriesEchAlpnAndPort() {
-    shadow.responder = { request ->
-      when (request.nsType) {
-        DnsResolver.TYPE_A -> request.callback.onAnswer(listOf(ipv4), 0)
-        else -> request.callback.onAnswer(listOf(), 0)
-      }
-    }
+  fun resolvesAddressesWithServiceMetadata() {
     shadow.rawResponder = { request ->
       request.callback.onAnswer(
         response(
           ResourceRecord.Https(
-            name = host,
+            name = "localhost",
             timeToLive = 5,
             alpnIds = listOf("h2"),
             port = 8443,
@@ -107,94 +77,58 @@ class AndroidDnsTest {
       )
     }
 
-    val records = dns.newCall(Dns.Request(host)).execute()
+    val records = AndroidDns(resolver).newCall(Dns.Request("localhost")).execute()
+
+    assertThat(records.filterIsInstance<Dns.Record.IpAddress>()).isNotEmpty()
 
     val serviceMetadata = records.filterIsInstance<Dns.Record.ServiceMetadata>().single()
-    assertThat(serviceMetadata.hostname).isEqualTo(host)
+    assertThat(serviceMetadata.hostname).isEqualTo("localhost")
     assertThat(serviceMetadata.echConfigList).isEqualTo(echConfigList)
     assertThat(serviceMetadata.port).isEqualTo(8443)
     assertThat(serviceMetadata.alpnIds).isNotNull().containsExactly(Protocol.HTTP_2)
   }
 
   @Test
-  fun includeServiceMetadataFalseSkipsHttpsQuery() {
-    val queriedTypes = mutableListOf<Int>()
-    var rawQueries = 0
-    shadow.responder = { request ->
-      queriedTypes += request.nsType
-      when (request.nsType) {
-        DnsResolver.TYPE_A -> request.callback.onAnswer(listOf(ipv4), 0)
-        else -> request.callback.onAnswer(listOf(), 0)
-      }
-    }
-    shadow.rawResponder = { rawQueries++ }
+  fun missingServiceMetadataIsNotFatal() {
+    // Default responder answers empty (unparseable) bytes, i.e. no usable HTTPS record.
+    val records = AndroidDns(resolver).newCall(Dns.Request("localhost")).execute()
 
-    val addressesOnly =
-      AndroidDns(
-        dnsResolver = resolver,
-        includeServiceMetadata = false,
-        executor = Executor { it.run() },
-      )
-    val records = addressesOnly.newCall(Dns.Request(host)).execute()
-
-    assertThat(queriedTypes).containsExactly(DnsResolver.TYPE_A, DnsResolver.TYPE_AAAA)
-    assertThat(rawQueries).isEqualTo(0)
+    assertThat(records.filterIsInstance<Dns.Record.IpAddress>()).isNotEmpty()
     assertThat(records.filterIsInstance<Dns.Record.ServiceMetadata>()).isEmpty()
-    assertThat(records.filterIsInstance<Dns.Record.IpAddress>().map { it.address })
-      .containsExactly(ipv4)
   }
 
   @Test
-  fun oneAddressFamilyFailingIsNotFatal() {
-    shadow.responder = { request ->
-      when (request.nsType) {
-        // NXDOMAIN for A, but AAAA resolves.
-        DnsResolver.TYPE_A -> request.callback.onAnswer(listOf(), 3)
-        else -> request.callback.onAnswer(listOf(ipv6), 0)
-      }
+  fun serviceMetadataDisabledSkipsHttpsQuery() {
+    var httpsQueried = false
+    shadow.rawResponder = {
+      httpsQueried = true
+      it.callback.onAnswer(ByteArray(0), 0)
     }
-    shadow.rawResponder = { it.callback.onAnswer(response(), 0) }
 
-    val records = dns.newCall(Dns.Request(host)).execute()
+    val records =
+      AndroidDns(resolver, includeServiceMetadata = false)
+        .newCall(Dns.Request("localhost"))
+        .execute()
 
-    assertThat(records.filterIsInstance<Dns.Record.IpAddress>().map { it.address })
-      .containsExactly(ipv6)
+    assertThat(records.filterIsInstance<Dns.Record.IpAddress>()).isNotEmpty()
+    assertThat(httpsQueried).isFalse()
   }
 
   @Test
-  fun bothAddressFamiliesFailing() {
-    shadow.responder = { it.callback.onAnswer(listOf(), 3) } // NXDOMAIN for A and AAAA.
-    shadow.rawResponder = { it.callback.onAnswer(response(), 0) }
-
+  fun unknownHostFails() {
     assertFailure {
-      dns.newCall(Dns.Request(host)).execute()
+      AndroidDns(resolver, includeServiceMetadata = false)
+        .newCall(Dns.Request("host.invalid"))
+        .execute()
     }.isInstanceOf(UnknownHostException::class)
   }
 
   @Test
-  fun malformedHttpsRecordIsNotFatal() {
-    shadow.responder = { request ->
-      when (request.nsType) {
-        DnsResolver.TYPE_A -> request.callback.onAnswer(listOf(ipv4), 0)
-        else -> request.callback.onAnswer(listOf(), 0)
-      }
-    }
-    shadow.rawResponder = { it.callback.onAnswer(byteArrayOf(1, 2, 3), 0) }
-
-    val records = dns.newCall(Dns.Request(host)).execute()
-
-    assertThat(records.filterIsInstance<Dns.Record.ServiceMetadata>()).isEmpty()
-    assertThat(records.filterIsInstance<Dns.Record.IpAddress>().map { it.address })
-      .containsExactly(ipv4)
-  }
-
-  @Test
   fun cancelNotifiesCallback() {
-    // Responders that never answer, leaving the call in flight.
-    shadow.responder = { }
+    // A responder that never answers, so the call stays in flight until canceled.
     shadow.rawResponder = { }
 
-    val call = dns.newCall(Dns.Request(host))
+    val call = AndroidDns(resolver).newCall(Dns.Request("localhost"))
     val failures = mutableListOf<IOException>()
     call.enqueue(
       object : Dns.Callback {
@@ -202,20 +136,20 @@ class AndroidDnsTest {
           call: Dns.Call,
           last: Boolean,
           records: List<Dns.Record>,
-        ) = error("unexpected records")
+        ) = Unit
 
         override fun onFailure(
           call: Dns.Call,
           e: IOException,
         ) {
-          failures += e
+          synchronized(failures) { failures += e }
         }
       },
     )
 
     call.cancel()
 
-    assertThat(failures).hasSize(1)
+    assertThat(synchronized(failures) { failures.toList() }).hasSize(1)
     assertThat(call.isCanceled()).isTrue()
   }
 

@@ -26,20 +26,24 @@ import java.util.concurrent.Executor
 import okhttp3.Dns
 import okhttp3.Protocol
 import okhttp3.internal.SuppressSignatureCheck
+import okhttp3.internal.concurrent.Task
+import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.dns.DnsMessageReader
-import okhttp3.internal.dns.RESPONSE_CODE_SUCCESS
 import okhttp3.internal.dns.ResourceRecord
 import okhttp3.internal.dns.TYPE_HTTPS
 import okhttp3.internal.dns.execute
 import okio.Buffer
 
 /**
- * A [Dns] backed by Android's [DnsResolver].
+ * A [Dns] backed by Android's system resolver, with ECH support from Android's [DnsResolver].
  *
- * Each resolution issues independent lookups. The `A` and `AAAA` lookups use
- * [query][DnsResolver.query], which the platform parses into [InetAddress]es for us. Unless
- * [includeServiceMetadata] is false, an `HTTPS` (type 65) lookup also runs for the RFC 9460
- * service record that carries the Encrypted Client Hello (ECH) configuration; the platform has no
+ * IP addresses come from the system resolver — [InetAddress.getAllByName], or
+ * [Network.getAllByName] when a [network] is set — so `localhost`, `/etc/hosts` entries, literal
+ * IPs and lenient names resolve exactly as they do under [Dns.SYSTEM]. The blocking lookup runs on
+ * a [TaskRunner] thread so [Dns.Call.enqueue] does not block.
+ *
+ * Unless [includeServiceMetadata] is false, an `HTTPS` (type 65) lookup also runs for the RFC 9460
+ * service record that carries the Encrypted Client Hello (ECH) configuration. The platform has no
  * typed API for that below API 36, so it goes through [rawQuery][DnsResolver.rawQuery] and is
  * decoded with OkHttp's own [DnsMessageReader] — the same decoder `DnsOverHttps` uses — so ALPN,
  * port, address hints and ECH are parsed uniformly.
@@ -50,7 +54,7 @@ import okio.Buffer
  * bound to the endpoint group it applies to, rather than being stashed in a side channel. Service
  * metadata is best-effort: a failed or absent HTTPS record never fails the lookup.
  *
- * Both APIs are available from Android 10 (API 29); applying ECH to a socket is a separate,
+ * [DnsResolver] is available from Android 10 (API 29); applying ECH to a socket is a separate,
  * later-platform concern that reads [Dns.Record.ServiceMetadata.echConfigList] off the result.
  *
  * Use it via [OkHttpClient.Builder.dns]:
@@ -95,8 +99,8 @@ class AndroidDns
       private val lock = Any()
       private var callback: Dns.Callback? = null
 
-      /** Outstanding queries: `A`, `AAAA`, and `HTTPS` if [includeServiceMetadata]. */
-      private var pending = if (includeServiceMetadata) 3 else 2
+      /** Outstanding lookups: the addresses, and `HTTPS` if [includeServiceMetadata]. */
+      private var pending = if (includeServiceMetadata) 2 else 1
       private var terminated = false
       private var anyRecordsEmitted = false
       private val failures = mutableListOf<IOException>()
@@ -111,72 +115,42 @@ class AndroidDns
           this.callback = callback
         }
 
-        queryAddresses(DnsResolver.TYPE_A)
-        queryAddresses(DnsResolver.TYPE_AAAA)
+        resolveAddresses()
         if (includeServiceMetadata) queryServiceMetadata()
       }
 
       /**
-       * Asks [DnsResolver] for `A` or `AAAA` records. The platform parses these for us, so this
-       * yields [InetAddress]es directly.
+       * Resolves IP addresses through the system resolver. This is a blocking call, so it runs on a
+       * [TaskRunner] thread. When canceled, it still runs to completion but its result is discarded.
        */
-      private fun queryAddresses(type: Int) {
-        val queryCallback =
-          object : DnsResolver.Callback<List<InetAddress>> {
-            override fun onAnswer(
-              answer: List<InetAddress>,
-              rcode: Int,
-            ) {
-              // A non-zero rcode with no addresses (NXDOMAIN, SERVFAIL) is a failure. An empty
-              // success is just a family this host doesn't publish.
-              val failure =
-                when {
-                  answer.isEmpty() && rcode != RESPONSE_CODE_SUCCESS -> {
-                    UnknownHostException("DNS lookup failed for ${request.hostname} (rcode $rcode)")
+      private fun resolveAddresses() {
+        TaskRunner.INSTANCE.newQueue().schedule(
+          object : Task("${request.hostname} address lookup", cancelable = false) {
+            override fun runOnce(): Long {
+              try {
+                val addresses =
+                  when (network) {
+                    null -> InetAddress.getAllByName(request.hostname)
+                    else -> network.getAllByName(request.hostname)
                   }
-
-                  else -> {
-                    null
-                  }
-                }
-              deliver(
-                records = answer.map { Dns.Record.IpAddress(request.hostname, it) },
-                failure = failure,
-              )
+                deliver(
+                  records = addresses.map { Dns.Record.IpAddress(request.hostname, it) },
+                  failure = null,
+                )
+              } catch (e: UnknownHostException) {
+                deliver(records = listOf(), failure = e)
+              }
+              return -1L
             }
-
-            override fun onError(e: DnsResolver.DnsException) {
-              deliver(
-                records = listOf(),
-                failure = request.hostname.toUnknownHostException(e),
-              )
-            }
-          }
-
-        try {
-          dnsResolver.query(
-            network,
-            request.hostname,
-            type,
-            DnsResolver.FLAG_EMPTY,
-            executor,
-            cancellationSignal,
-            queryCallback,
-          )
-        } catch (e: Exception) {
-          // query can reject a hostname synchronously (e.g. IDN.toASCII on an underscore name).
-          deliver(
-            records = listOf(),
-            failure = request.hostname.toUnknownHostException(e),
-          )
-        }
+          },
+        )
       }
 
       /**
        * Asks [DnsResolver] for the `HTTPS` record. The platform has no typed API for this below
        * API 36, so we request the raw message and decode it with OkHttp's own [DnsMessageReader] —
        * the same decoder `DnsOverHttps` uses. Failures here are never fatal: service metadata is
-       * best-effort, and the address queries carry the lookup.
+       * best-effort, and the address lookup carries the resolution.
        */
       private fun queryServiceMetadata() {
         val queryCallback =
@@ -248,8 +222,8 @@ class AndroidDns
       }
 
       /**
-       * Delivers the outcome of one query to the callback. Calls are serialized by [lock]; the last
-       * query to finish reports `last = true`, or reports failure if nothing resolved at all.
+       * Delivers the outcome of one lookup to the callback. Calls are serialized by [lock]; the last
+       * lookup to finish reports `last = true`, or reports failure if nothing resolved at all.
        */
       private fun deliver(
         records: List<Dns.Record>,
@@ -303,8 +277,3 @@ private fun List<IOException>.combined(): IOException {
   for (i in 1 until size) first.addSuppressed(this[i])
   return first
 }
-
-private fun String.toUnknownHostException(cause: Throwable): UnknownHostException =
-  UnknownHostException("DNS lookup failed for $this").apply {
-    initCause(cause)
-  }
