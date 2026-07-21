@@ -30,12 +30,26 @@ class ShadowDnsResolver {
     it.callback.onAnswer(listOf(), 0)
   }
 
+  /** Answers [rawQuery] lookups. Defaults to an empty (unparseable) response. */
+  var rawResponder: (RawRequest) -> Unit = {
+    it.callback.onAnswer(ByteArray(0), 0)
+  }
+
   data class Request(
     val network: Network?,
     val domain: String,
     val nsType: Int,
     val flags: Int,
     val callback: DnsResolver.Callback<List<InetAddress>>,
+  )
+
+  data class RawRequest(
+    val network: Network?,
+    val domain: String,
+    val nsClass: Int,
+    val nsType: Int,
+    val flags: Int,
+    val callback: DnsResolver.Callback<ByteArray>,
   )
 
   @Implementation
@@ -49,6 +63,20 @@ class ShadowDnsResolver {
     callback: DnsResolver.Callback<List<InetAddress>>,
   ) {
     responder(Request(network, domain, nsType, flags, callback))
+  }
+
+  @Implementation
+  fun rawQuery(
+    network: Network?,
+    domain: String,
+    nsClass: Int,
+    nsType: Int,
+    flags: Int,
+    executor: Executor,
+    cancellationSignal: CancellationSignal?,
+    callback: DnsResolver.Callback<ByteArray>,
+  ) {
+    rawResponder(RawRequest(network, domain, nsClass, nsType, flags, callback))
   }
 
   companion object {
