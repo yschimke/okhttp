@@ -113,9 +113,10 @@ class DefoEchTest(
   /** 7. Conscrypt rejects a zero-length ECHConfig while starting the TLS handshake. */
   @Test
   fun zeroLengthEchConfigFails() {
+    val url = nginxUrl("bk2-ng")
     val failure =
       assertThrows<IOException> {
-        client.get(nginxUrl("bk2-ng"))
+        client.get(url)
       }
 
     assertThat(failure.causesAndSuppressed().any { it is InvalidEchDataException }).isTrue()
@@ -139,8 +140,9 @@ class DefoEchTest(
   /** 10. Address hints are not treated as A/AAAA answers, so the hostname cannot be resolved. */
   @Test
   fun addressHintsWithoutAddressesFailResolution() {
+    val url = nginxUrl("noaddr-ng")
     assertThrows<UnknownHostException> {
-      client.get(nginxUrl("noaddr-ng"))
+      client.get(url)
     }
   }
 
@@ -266,13 +268,23 @@ class DefoEchTest(
       .contains("\"SSL_ECH_STATUS\": \"SSL_ECH_STATUS_SUCCESS\"")
   }
 
-  /** 27. OpenSSL s_server reports a successful ECH handshake. */
+  /**
+   * 27. OpenSSL s_server reports a successful ECH handshake.
+   *
+   * The Android emulator currently selects an unreachable IPv6 route for the direct `15447`
+   * backend. Keep that variant for running this test on a physical device.
+   */
   @Test
   fun opensslServer() {
     assertThat(client.get(testUrl("ss", "stats", nonStandardPort = 15447))).contains("ECH success")
   }
 
-  /** 28. ECH survives a TLS HelloRetryRequest from OpenSSL s_server. */
+  /**
+   * 28. ECH survives a TLS HelloRetryRequest from OpenSSL s_server.
+   *
+   * The Android emulator currently selects an unreachable IPv6 route for the direct `15448`
+   * backend. Keep that variant for running this test on a physical device.
+   */
   @Test
   fun opensslServerForcingHelloRetryRequest() {
     assertThat(client.get(testUrl("sshrr", "stats", nonStandardPort = 15448))).contains("ECH success")
