@@ -87,7 +87,6 @@ class EchTest(
     // The outer certificate authenticates public.tls-ech.dev,
     // so the retry config may be used if it matches.
     // https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.6
-    // TODO: Add a fixture whose public hostname fails authentication.
     val verifiedHostnames = mutableListOf<String>()
     val hostnameVerifier = client.hostnameVerifier
     val client =
@@ -103,6 +102,22 @@ class EchTest(
 
     assertThat(body).contains("You are using ECH")
     assertThat(verifiedHostnames).contains("public.tls-ech.dev")
+  }
+
+  /**
+   * A retry configuration must not be trusted unless the server certificate authenticates its
+   * ECH public name.
+   *
+   * Known test gap: the public [tls-ech.dev client examples](https://tls-ech.dev/) include a valid
+   * different-public-name case but don't expose an equivalent fixture with an unauthenticated
+   * public name. Keep this red until that negative fixture exists.
+   *
+   * [RFC 9849 §6.1.6](https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.6) requires the client
+   * to authenticate the public name before using retry configurations.
+   */
+  @Test
+  fun unauthenticatedPublicHostnameIsRejectedBeforeRetry() {
+    fail("Known test gap: no public fixture has an unauthenticated ECH public name")
   }
 
   /**
