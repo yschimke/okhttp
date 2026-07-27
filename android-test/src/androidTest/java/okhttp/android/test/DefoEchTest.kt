@@ -31,6 +31,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.android.EchAwareDns
 import okhttp3.dnsoverhttps.DnsOverHttps
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
@@ -93,21 +94,22 @@ class DefoEchTest(
 
   /**
    * 5. DNS answer ordering determines whether the selected binding is the usable X25519 record or
-   * one of the records with unsupported KEM 0xcccc. DoH consistently retains a bad final record.
+   * one of the records with unsupported KEM 0xcccc. A client that selects an unusable record may
+   * omit ECH or send a GREASE ECH extension.
    */
   @Test
   fun badGoodBadServiceBindings() {
     if (useDoh) {
-      assertNginxEchNotAttempted("v4-ng")
+      assertNginxEchNotAccepted("v4-ng")
     } else {
-      assertNginxEchOutcome("v4-ng", "success", "not attempted")
+      assertNginxEchSuccessOrNotAccepted("v4-ng")
     }
   }
 
-  /** 6. An ECH config with unsupported KEM 0xcccc is ignored. */
+  /** 6. An ECH config with unsupported KEM 0xcccc isn't accepted; the client may send GREASE. */
   @Test
-  fun unsupportedKemDoesNotAttemptEch() {
-    assertNginxEchNotAttempted("bk1-ng")
+  fun unsupportedKemDoesNotAcceptEch() {
+    assertNginxEchNotAccepted("bk1-ng")
   }
 
   /** 7. Conscrypt rejects a zero-length ECHConfig while starting the TLS handshake. */
@@ -122,10 +124,10 @@ class DefoEchTest(
     assertThat(failure.causesAndSuppressed().any { it is InvalidEchDataException }).isTrue()
   }
 
-  /** 8. An ECH config with unsupported version 0xcccc is ignored. */
+  /** 8. An ECH config with unsupported version 0xcccc isn't accepted; the client may send GREASE. */
   @Test
-  fun unsupportedEchVersionDoesNotAttemptEch() {
-    assertNginxEchNotAttempted("bv-ng")
+  fun unsupportedEchVersionDoesNotAcceptEch() {
+    assertNginxEchNotAccepted("bv-ng")
   }
 
   /**
@@ -161,22 +163,24 @@ class DefoEchTest(
     assertNginxEchSuccess("mixedmode-ng")
   }
 
-  /** 13. Android 37 doesn't attempt ECH with a P-256, HKDF-SHA384, ChaCha20 config. */
+  /**
+   * 13. Android 37 doesn't accept a P-256, HKDF-SHA384, ChaCha20 config; it may send GREASE.
+   */
   @Test
-  fun p256HkdfSha384AndChaCha20Poly1305DoesNotAttemptEch() {
-    assertNginxEchNotAttempted("p256-ng")
+  fun p256HkdfSha384AndChaCha20Poly1305DoesNotAcceptEch() {
+    assertNginxEchNotAccepted("p256-ng")
   }
 
   /**
-   * 14. X25519 succeeds and P-256 isn't attempted. With the same service priority, DNS answer
-   * ordering determines which one is selected. DoH consistently retains the final P-256 record.
+   * 14. X25519 succeeds and P-256 isn't accepted. With the same service priority, DNS answer
+   * ordering determines which one is selected. An unusable selection may send GREASE.
    */
   @Test
   fun x25519AndP256AtSamePriority() {
     if (useDoh) {
-      assertNginxEchNotAttempted("curves1-ng")
+      assertNginxEchNotAccepted("curves1-ng")
     } else {
-      assertNginxEchOutcome("curves1-ng", "success", "not attempted")
+      assertNginxEchSuccessOrNotAccepted("curves1-ng")
     }
   }
 
@@ -187,22 +191,22 @@ class DefoEchTest(
   @Test
   fun x25519BeforeP256() {
     if (useDoh) {
-      assertNginxEchNotAttempted("curves2-ng")
+      assertNginxEchNotAccepted("curves2-ng")
     } else {
-      assertNginxEchOutcome("curves2-ng", "success", "not attempted")
+      assertNginxEchSuccessOrNotAccepted("curves2-ng")
     }
   }
 
   /**
-   * 16. X25519 succeeds and P-256 isn't attempted. DoH retains the final X25519 record, while the
-   * platform resolver's answer ordering can select either record.
+   * 16. X25519 succeeds and P-256 isn't accepted. DoH retains the final X25519 record, while the
+   * platform resolver's answer ordering can select either record and may send GREASE.
    */
   @Test
   fun p256BeforeX25519() {
     if (useDoh) {
       assertNginxEchSuccess("curves3-ng")
     } else {
-      assertNginxEchOutcome("curves3-ng", "success", "not attempted")
+      assertNginxEchSuccessOrNotAccepted("curves3-ng")
     }
   }
 
@@ -257,45 +261,53 @@ class DefoEchTest(
   /** 25. Apache reports a successful ECH handshake. */
   @Test
   fun apacheServer() {
-    assertThat(client.get(testUrl("ap", "echstat.php?format=json")))
+    assertThat(client.get(testUrl("ap.test.defo.ie", "echstat.php?format=json")))
       .contains("\"SSL_ECH_STATUS\": \"success\"")
   }
 
   /** 26. lighttpd reports a successful ECH handshake. */
   @Test
   fun lighttpdServer() {
-    assertThat(client.get(testUrl("ly", "echstat.php?format=json")))
+    assertThat(client.get(testUrl("ly.test.defo.ie", "echstat.php?format=json")))
       .contains("\"SSL_ECH_STATUS\": \"SSL_ECH_STATUS_SUCCESS\"")
   }
 
   /**
    * 27. OpenSSL s_server reports a successful ECH handshake.
    *
-   * The Android emulator currently selects an unreachable IPv6 route for the direct `15447`
-   * backend. Keep that variant for running this test on a physical device.
+   * The direct backend is currently inaccessible: IPv6 is unroutable from the emulator, and IPv4
+   * also times out from a physical device.
    */
   @Test
   fun opensslServer() {
-    assertThat(client.get(testUrl("ss", "stats", nonStandardPort = 15447))).contains("ECH success")
+    assumeFalse(port == 15447, "ss.test.defo.ie:15447 is currently inaccessible")
+    assertThat(client.get(testUrl("ss.test.defo.ie", "stats", nonStandardPort = 15447)))
+      .contains("ECH success")
   }
 
   /**
    * 28. ECH survives a TLS HelloRetryRequest from OpenSSL s_server.
    *
-   * The Android emulator currently selects an unreachable IPv6 route for the direct `15448`
-   * backend. Keep that variant for running this test on a physical device.
+   * The direct backend is currently inaccessible: IPv6 is unroutable from the emulator, and IPv4
+   * also times out from a physical device.
    */
   @Test
   fun opensslServerForcingHelloRetryRequest() {
-    assertThat(client.get(testUrl("sshrr", "stats", nonStandardPort = 15448))).contains("ECH success")
+    assumeFalse(port == 15448, "sshrr.test.defo.ie:15448 is currently inaccessible")
+    assertThat(client.get(testUrl("sshrr.test.defo.ie", "stats", nonStandardPort = 15448)))
+      .contains("ECH success")
   }
 
   private fun assertNginxEchSuccess(host: String) {
     assertNginxEchOutcome(host, "success")
   }
 
-  private fun assertNginxEchNotAttempted(host: String) {
-    assertNginxEchOutcome(host, "not attempted")
+  private fun assertNginxEchNotAccepted(host: String) {
+    assertNginxEchOutcome(host, "not attempted", "GREASEd ECH")
+  }
+
+  private fun assertNginxEchSuccessOrNotAccepted(host: String) {
+    assertNginxEchOutcome(host, "success", "not attempted", "GREASEd ECH")
   }
 
   private fun assertNginxEchOutcome(
@@ -315,23 +327,23 @@ class DefoEchTest(
 
   private fun nginxUrl(host: String): String =
     testUrl(
-      host = host,
+      hostname = "$host.test.defo.ie",
       path = "echstat.php?format=json",
       nonStandardPort = 15443,
     )
 
   private fun testUrl(
-    host: String,
+    hostname: String,
     path: String,
     nonStandardPort: Int? = null,
   ): String {
     assumeTrue(
       port == null || port == nonStandardPort,
-      "$host.test.defo.ie does not publish a test URL on port $port",
+      "$hostname does not publish a test URL on port $port",
     )
 
     val portSuffix = port?.let { ":$it" }.orEmpty()
-    return "https://$host.test.defo.ie$portSuffix/$path"
+    return "https://$hostname$portSuffix/$path"
   }
 
   private fun Throwable.causesAndSuppressed(): Sequence<Throwable> =
