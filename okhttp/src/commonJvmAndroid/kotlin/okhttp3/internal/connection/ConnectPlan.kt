@@ -35,6 +35,7 @@ import okhttp3.Handshake.Companion.handshake
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Route
+import okhttp3.TlsVersion
 import okhttp3.internal.closeQuietly
 import okhttp3.internal.concurrent.TaskRunner
 import okhttp3.internal.concurrent.withLock
@@ -43,6 +44,7 @@ import okhttp3.internal.dns.EchRetryConfig
 import okhttp3.internal.http.ExchangeCodec
 import okhttp3.internal.http1.Http1ExchangeCodec
 import okhttp3.internal.platform.Platform
+import okhttp3.internal.platform.Platform.Companion.WARN
 import okhttp3.internal.tls.OkHostnameVerifier
 import okhttp3.internal.toHostHeader
 
@@ -483,13 +485,29 @@ class ConnectPlan internal constructor(
     sslSocket: SSLSocket,
   ): ConnectPlan {
     if (connectionSpecIndex != -1) return this
-    return nextCompatibleConnectionSpec(connectionSpecs, sslSocket)
-      ?: throw UnknownServiceException(
-        "Unable to find acceptable protocols." +
-          " isFallback=$isTlsFallback," +
-          " modes=$connectionSpecs," +
-          " supported protocols=${sslSocket.enabledProtocols!!.contentToString()}",
+    val result =
+      nextCompatibleConnectionSpec(connectionSpecs, sslSocket)
+        ?: throw UnknownServiceException(
+          "Unable to find acceptable protocols." +
+            " isFallback=$isTlsFallback," +
+            " modes=$connectionSpecs," +
+            " supported protocols=${sslSocket.enabledProtocols!!.contentToString()}",
+        )
+
+    // We have an ECH config, but this client can't use it.
+    // The handshake will still succeed, only without ECH, so warn rather than fail.
+    // TODO strongly consider failing this - both the developer and the server enabled ECH
+    // TODO add a test for this.
+    if (route.echConfigList != null &&
+      !connectionSpecs[result.connectionSpecIndex].canCarryEch(sslSocket)
+    ) {
+      Platform.get().log(
+        "ECH config available for ${route.address.url.host}, but connection spec is incompatible",
+        WARN,
       )
+    }
+
+    return result
   }
 
   /**
@@ -543,7 +561,40 @@ class ConnectPlan internal constructor(
     // connection
     if (echRetryConfig != null || !retryTlsHandshake(sslException)) return null
 
-    return nextCompatibleConnectionSpec(connectionSpecs, sslSocket)
+    val result = nextCompatibleConnectionSpec(connectionSpecs, sslSocket) ?: return null
+
+    // We started with an ECH config, so the fallback must be able to carry it too. Downgrading to
+    // a spec without TLS 1.3 would leak the SNI we just took care to encrypt; fail instead.
+    // TODO add a test for this.
+    if (route.echConfigList != null &&
+      !connectionSpecs[result.connectionSpecIndex].canCarryEch(sslSocket)
+    ) {
+      Platform.get().log(
+        "Not falling back to ${connectionSpecs[result.connectionSpecIndex]}:" +
+          " it would disable ECH for ${route.address.url.host}",
+        WARN,
+      )
+      return null
+    }
+
+    return result
+  }
+
+  /**
+   * Returns true if this spec can negotiate TLS 1.3 on the [SSLSocket].
+   *
+   * ECH is only defined for TLS 1.3, so a handshake without it silently sends the SNI in the clear.
+   *
+   * https://www.rfc-editor.org/rfc/rfc9849.html#section-1
+   */
+  private fun ConnectionSpec.canCarryEch(sslSocket: SSLSocket): Boolean {
+    if (!supportsTlsExtensions) return false
+
+    // TODO consider checking this, but server may have reasons
+    // if (TlsVersion.TLS_1_3.javaName !in sslSocket.enabledProtocols) return false
+
+    val tlsVersions = tlsVersions ?: return true
+    return TlsVersion.TLS_1_3 in tlsVersions
   }
 
   /**
