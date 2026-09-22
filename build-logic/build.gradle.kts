@@ -1,6 +1,7 @@
 plugins {
   `kotlin-dsl`
-  id("com.diffplug.spotless") version "8.2.1"
+  alias(libs.plugins.android.lint)
+  alias(libs.plugins.spotless)
 }
 
 configure<com.diffplug.gradle.spotless.SpotlessExtension> {
@@ -10,6 +11,7 @@ configure<com.diffplug.gradle.spotless.SpotlessExtension> {
   }
   kotlinGradle {
     target("*.kts")
+    targetExclude("build/**/*.kts")
     ktlint()
   }
 }
@@ -35,6 +37,7 @@ dependencies {
   implementation(libs.gradlePlugin.ksp)
   implementation(libs.gradlePlugin.mrjar)
   implementation(libs.gradlePlugin.tapmoc)
-  implementation(libs.androidx.lint.gradle)
   implementation(libs.kotlin.gradle.plugin.api)
+
+  lintChecks(libs.androidx.lint.gradle)
 }
