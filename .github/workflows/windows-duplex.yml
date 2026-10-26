@@ -23,6 +23,8 @@ jobs:
         java: ['21.0.10', '21']
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
