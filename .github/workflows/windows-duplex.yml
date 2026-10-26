@@ -1,4 +1,4 @@
-name: Windows duplex investigation
+name: Windows duplex
 
 on:
   push:
@@ -19,7 +19,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [baseline, fixed]
         java: ['21.0.10', '21']
     steps:
       - uses: actions/checkout@v7
@@ -32,14 +31,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Repeat the auth challenge 100 times
         shell: pwsh
-        env:
-          VARIANT: ${{ matrix.variant }}
         run: |
           $path = 'okhttp/src/jvmTest/kotlin/okhttp3/DuplexTest.kt'
-          if ($env:VARIANT -eq 'baseline') {
-            git restore --source=c4acb20e98487871b7c75a5908b8104e11658425 -- $path
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
           $source = [IO.File]::ReadAllText($path)
           $pattern = '@Test\s+fun duplexWithAuthChallenge\(\)'
           if ([regex]::Matches($source, $pattern).Count -ne 1) { throw 'Test not found exactly once' }
@@ -50,7 +43,29 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: duplex-${{ matrix.variant }}-jdk-${{ matrix.java }}
+          name: duplex-jdk-${{ matrix.java }}
+          path: |
+            okhttp/build/test-results/
+            okhttp/build/reports/tests/
+
+  jvm-suite:
+    if: github.repository == 'yschimke/okhttp'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Check formatting and run the JVM suite
+        run: ./gradlew :okhttp:spotlessCheck :okhttp:jvmTest --no-build-cache --stacktrace
+      - name: Upload suite evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-jvm-suite
           path: |
             okhttp/build/test-results/
             okhttp/build/reports/tests/
