@@ -497,11 +497,11 @@ class DuplexTest {
     enableProtocol(Protocol.HTTP_2)
     val credential = basic("jesse", "secret")
     val duplexResponseSent = CountDownLatch(1)
-    val requestHeadersEndListener =
+    val responseHeadersEndListener =
       object : EventListener() {
-        override fun requestHeadersEnd(
+        override fun responseHeadersEnd(
           call: Call,
-          request: Request,
+          response: Response,
         ) {
           // Finish sending the challenge body before the client cancels this exchange for auth.
           assertTrue(duplexResponseSent.await(5, TimeUnit.SECONDS))
@@ -511,7 +511,7 @@ class DuplexTest {
       client
         .newBuilder()
         .authenticator(RecordingOkAuthenticator(credential, null))
-        .eventListener(eventRecorder.eventListener + requestHeadersEndListener)
+        .eventListener(eventRecorder.eventListener + responseHeadersEndListener)
         .build()
     val body1 =
       MockSocketHandler()
