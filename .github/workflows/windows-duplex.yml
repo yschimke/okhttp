@@ -1,0 +1,54 @@
+name: Windows duplex investigation
+
+on:
+  push:
+    branches: [goal-1793053073254-bb7db1]
+  pull_request:
+    paths:
+      - okhttp/src/jvmTest/kotlin/okhttp3/DuplexTest.kt
+      - .github/workflows/windows-duplex.yml
+
+permissions:
+  contents: read
+
+jobs:
+  repeated-duplex:
+    if: github.repository == 'yschimke/okhttp'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, fixed]
+        java: ['21.0.10', '21']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Repeat the auth challenge 100 times
+        shell: pwsh
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          $path = 'okhttp/src/jvmTest/kotlin/okhttp3/DuplexTest.kt'
+          if ($env:VARIANT -eq 'baseline') {
+            git restore --source=c4acb20e98487871b7c75a5908b8104e11658425 -- $path
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $source = [IO.File]::ReadAllText($path)
+          $pattern = '@Test\s+fun duplexWithAuthChallenge\(\)'
+          if ([regex]::Matches($source, $pattern).Count -ne 1) { throw 'Test not found exactly once' }
+          $source = [regex]::Replace($source, $pattern, '@org.junit.jupiter.api.RepeatedTest(100)' + "`n  fun duplexWithAuthChallenge()")
+          [IO.File]::WriteAllText($path, $source)
+          ./gradlew :okhttp:jvmTest --tests 'okhttp3.DuplexTest.duplexWithAuthChallenge' --no-build-cache --stacktrace
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duplex-${{ matrix.variant }}-jdk-${{ matrix.java }}
+          path: |
+            okhttp/build/test-results/
+            okhttp/build/reports/tests/
