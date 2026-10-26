@@ -496,14 +496,14 @@ class DuplexTest {
   fun duplexWithAuthChallenge() {
     enableProtocol(Protocol.HTTP_2)
     val duplexResponseSent = CountDownLatch(1)
-    val requestHeadersEndListener =
+    val responseHeadersEndListener =
       object : EventListener() {
-        override fun requestHeadersEnd(
+        override fun responseHeadersEnd(
           call: Call,
-          request: Request,
+          response: Response,
         ) {
-          // Wait for the server to send the duplex response before acting on the redirect.
-          duplexResponseSent.await()
+          // Finish sending the challenge body before the client cancels this exchange for auth.
+          assertTrue(duplexResponseSent.await(5, TimeUnit.SECONDS))
         }
       }
     val credential = basic("jesse", "secret")
